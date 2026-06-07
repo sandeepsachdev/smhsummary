@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMH — Today's Briefing</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;1,8..60,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ink: #1a1108;
+    --ink-soft: #4a3f30;
+    --ink-faint: #8a7a66;
+    --paper: #f5f0e8;
+    --paper-warm: #ece6d8;
+    --paper-deep: #dfd8c8;
+    --accent: #b5260e;
+    --accent-soft: #e8d5d0;
+    --gold: #c9952a;
+    --gold-light: #f0dfa0;
+    --rule: #c8bfaf;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Source Serif 4', Georgia, serif;
+    min-height: 100vh;
+    padding: 0;
+    position: relative;
+  }
+
+  /* Texture overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* MASTHEAD */
+  .masthead {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 20px 40px 16px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    border-bottom: 3px solid var(--gold);
+    position: relative;
+  }
+
+  .masthead::after {
+    content: '';
+    position: absolute;
+    bottom: -7px;
+    left: 0; right: 0;
+    height: 1px;
+    background: var(--gold);
+    opacity: 0.4;
+  }
+
+  .masthead-title {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(28px, 5vw, 52px);
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: var(--paper);
+  }
+
+  .masthead-sub {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: var(--gold-light);
+    text-transform: uppercase;
+    margin-top: 6px;
+  }
+
+  .masthead-date {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--paper);
+    opacity: 0.6;
+    text-align: right;
+    line-height: 1.6;
+  }
+
+  /* CONTROLS */
+  .controls {
+    background: var(--paper-warm);
+    border-bottom: 1px solid var(--rule);
+    padding: 14px 40px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+
+  .controls label {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    padding: 8px 20px;
+    border: 1.5px solid var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+    cursor: pointer;
+    letter-spacing: 0.08em;
+    transition: all 0.15s;
+  }
+
+  .btn:hover { background: var(--accent); border-color: var(--accent); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--ink);
+  }
+  .btn-ghost:hover { background: var(--ink); color: var(--paper); }
+
+  .cutoff-info {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-left: auto;
+  }
+
+  /* MAIN */
+  .main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 40px 40px 80px;
+  }
+
+  /* STATUS */
+  .status {
+    text-align: center;
+    padding: 60px 20px;
+  }
+
+  .status-icon {
+    font-size: 40px;
+    margin-bottom: 16px;
+    display: block;
+  }
+
+  .status h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 22px;
+    margin-bottom: 10px;
+    color: var(--ink);
+  }
+
+  .status p {
+    font-size: 15px;
+    color: var(--ink-soft);
+    line-height: 1.6;
+    max-width: 500px;
+    margin: 0 auto;
+  }
+
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 2.5px solid var(--rule);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 20px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* STATS BAR */
+  .stats-bar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 16px 0 32px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 40px;
+    flex-wrap: wrap;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .stat-num {
+    font-family: 'Playfair Display', serif;
+    font-size: 28px;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--accent);
+  }
+
+  .stat-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .stat-divider {
+    width: 1px;
+    height: 36px;
+    background: var(--rule);
+  }
+
+  /* THEME GROUP */
+  .theme-group {
+    margin-bottom: 52px;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .theme-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1.5px solid var(--rule);
+  }
+
+  .theme-tag {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .theme-count {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-faint);
+  }
+
+  /* ARTICLE CARD */
+  .articles-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .article-card {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px;
+    padding: 18px 0;
+    border-bottom: 1px solid var(--paper-deep);
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.15s;
+    position: relative;
+  }
+
+  .article-card:hover {
+    background: var(--paper-warm);
+    padding-left: 12px;
+    padding-right: 12px;
+    margin: 0 -12px;
+    border-radius: 2px;
+  }
+
+  .article-card:hover .article-title {
+    color: var(--accent);
+  }
+
+  .article-body {}
+
+  .article-category {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 5px;
+  }
+
+  .article-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.35;
+    margin-bottom: 7px;
+    transition: color 0.15s;
+  }
+
+  .article-summary {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--ink-soft);
+    font-style: italic;
+  }
+
+  .article-meta {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    flex-direction: column;
+    min-width: 80px;
+    text-align: right;
+  }
+
+  .article-time {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-faint);
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+
+  .article-link-icon {
+    font-size: 13px;
+    color: var(--ink-faint);
+    margin-top: 2px;
+    align-self: flex-end;
+  }
+
+  /* ERROR BANNER */
+  .cors-note {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    padding: 16px 20px;
+    margin-bottom: 32px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--ink);
+  }
+
+  .cors-note strong {
+    display: block;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+
+  .cors-note code {
+    background: var(--paper-deep);
+    padding: 2px 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    border-radius: 2px;
+  }
+
+  /* FOOTER */
+  .footer {
+    text-align: center;
+    padding: 24px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--ink-faint);
+    border-top: 1px solid var(--rule);
+  }
+
+  @media (max-width: 600px) {
+    .masthead, .controls, .main { padding-left: 20px; padding-right: 20px; }
+    .article-card { grid-template-columns: 1fr; }
+    .article-meta { flex-direction: row; justify-content: space-between; }
+    .controls { padding-top: 10px; padding-bottom: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div>
+    <div class="masthead-title">SMH Briefing</div>
+    <div class="masthead-sub">Sydney Morning Herald — Since Midnight</div>
+  </div>
+  <div class="masthead-date" id="masthead-date"></div>
+</header>
+
+<div class="controls">
+  <label>Feed</label>
+  <button class="btn" id="loadBtn" onclick="loadFeed()">Load Today's Articles</button>
+  <button class="btn btn-ghost" id="refreshBtn" onclick="loadFeed()" style="display:none">↺ Refresh</button>
+  <span class="cutoff-info" id="cutoff-info"></span>
+</div>
+
+<main class="main">
+  <div class="status" id="status">
+    <span class="status-icon">📰</span>
+    <h2>Ready to load</h2>
+    <p>Click <strong>Load Today's Articles</strong> to fetch the latest from the Sydney Morning Herald RSS feed published since midnight Sydney time.</p>
+  </div>
+  <div id="content" style="display:none"></div>
+</main>
+
+<footer class="footer">
+  SMH RSS Reader &nbsp;·&nbsp; Articles since midnight AEST &nbsp;·&nbsp; Data from smh.com.au
+</footer>
+
+<script>
+// ─── Date helpers ───────────────────────────────────────────────────────────
+
+function getSydneyMidnight() {
+  // Get current time in Sydney
+  const now = new Date();
+  const sydneyStr = now.toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
+  const sydneyNow = new Date(sydneyStr);
+  // Build midnight Sydney today
+  const midnight = new Date(sydneyNow);
+  midnight.setHours(0, 0, 0, 0);
+  // Convert back to UTC offset
+  const utcMidnight = new Date(midnight.getTime() - (sydneyNow.getTime() - now.getTime()));
+  return utcMidnight;
+}
+
+function formatSydneyTime(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString('en-AU', {
+    timeZone: 'Australia/Sydney',
+    hour: '2-digit', minute: '2-digit', hour12: true
+  });
+}
+
+function sydneyDateLabel() {
+  return new Date().toLocaleDateString('en-AU', {
+    timeZone: 'Australia/Sydney',
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  });
+}
+
+// ─── Masthead date ───────────────────────────────────────────────────────────
+
+document.getElementById('masthead-date').innerHTML =
+  sydneyDateLabel() + '<br>Sydney, Australia';
+
+// ─── Theme classifier ────────────────────────────────────────────────────────
+
+const THEMES = [
+  { key: 'Politics & Government', emoji: '🏛️', keywords: ['government','minister','parliament','albanese','premier','senate','federal','election','policy','political','labor','liberal','coalition','budget','aec','legislation'] },
+  { key: 'Crime & Justice', emoji: '⚖️', keywords: ['police','court','murder','charged','arrested','guilty','verdict','trial','crime','attack','assault','shooting','stabbing','robbery','fraud','bail','sentence'] },
+  { key: 'Business & Economy', emoji: '📈', keywords: ['shares','asx','market','economy','economic','bank','interest rate','inflation','gdp','profit','revenue','ceo','company','trade','stock','housing','mortgage','real estate'] },
+  { key: 'World News', emoji: '🌏', keywords: ['ukraine','russia','china','us','united states','israel','gaza','middle east','europe','nato','trump','biden','war','conflict','international'] },
+  { key: 'Technology & AI', emoji: '💻', keywords: ['ai','artificial intelligence','tech','technology','cyber','data','software','app','startup','digital','elon','tesla','openai','google','meta'] },
+  { key: 'Health & Science', emoji: '🧬', keywords: ['health','hospital','cancer','covid','vaccine','research','medical','science','climate','environment','study','treatment','mental health','nhs','pandemic'] },
+  { key: 'Sport', emoji: '🏅', keywords: ['nrl','afl','cricket','rugby','tennis','golf','football','soccer','swim','olympic','champion','match','game','player','team','coach','league','final','grand prix'] },
+  { key: 'Culture & Lifestyle', emoji: '🎭', keywords: ['art','music','film','movie','book','festival','restaurant','food','fashion','celebrity','award','theatre','entertainment','culture','travel','lifestyle','review'] },
+  { key: 'NSW & Sydney', emoji: '🌆', keywords: ['sydney','nsw','new south wales','council','transport','infrastructure','train','bus','road','suburb','local','westmead','parramatta','bondi','manly'] },
+];
+
+function classifyArticle(item) {
+  const text = ((item.title || '') + ' ' + (item.description || '') + ' ' + (item.category || '')).toLowerCase();
+  for (const theme of THEMES) {
+    if (theme.keywords.some(k => text.includes(k))) return theme;
+  }
+  return { key: 'Other', emoji: '📄', keywords: [] };
+}
+
+// ─── RSS parse ───────────────────────────────────────────────────────────────
+
+function parseRSS(xmlText) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlText, 'text/xml');
+  const items = Array.from(doc.querySelectorAll('item'));
+
+  return items.map(item => {
+    const get = (tag) => item.querySelector(tag)?.textContent?.trim() || '';
+    const pubDate = get('pubDate');
+    return {
+      title: get('title'),
+      link: get('link'),
+      description: get('description').replace(/<[^>]+>/g, '').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").substring(0, 220),
+      pubDate,
+      pubDateObj: pubDate ? new Date(pubDate) : new Date(0),
+      category: get('category'),
+    };
+  });
+}
+
+// ─── CORS proxy options ───────────────────────────────────────────────────────
+
+const RSS_URL = 'https://www.smh.com.au/rss/feed.xml';
+const PROXIES = [
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://thingproxy.freeboard.io/fetch/${encodeURIComponent(url)}`,
+];
+
+async function fetchWithProxy(url) {
+  for (let i = 0; i < PROXIES.length; i++) {
+    try {
+      const proxyUrl = PROXIES[i](url);
+      const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      if (!text.includes('<rss') && !text.includes('<feed')) throw new Error('Not RSS');
+      return { text, proxyIndex: i };
+    } catch(e) {
+      if (i === PROXIES.length - 1) throw e;
+    }
+  }
+}
+
+// ─── Render ──────────────────────────────────────────────────────────────────
+
+function renderArticles(articles, cutoffDate) {
+  const filtered = articles.filter(a => a.pubDateObj >= cutoffDate);
+  const content = document.getElementById('content');
+
+  if (filtered.length === 0) {
+    content.innerHTML = `
+      <div class="status">
+        <span class="status-icon">🌅</span>
+        <h2>No new articles yet</h2>
+        <p>No articles found after midnight Sydney time (${cutoffDate.toLocaleTimeString('en-AU',{timeZone:'Australia/Sydney',hour:'2-digit',minute:'2-digit'})}). 
+        The feed has ${articles.length} earlier articles — try refreshing in a moment.</p>
+      </div>`;
+    return;
+  }
+
+  // Group by theme
+  const grouped = {};
+  filtered.forEach(a => {
+    const theme = classifyArticle(a);
+    if (!grouped[theme.key]) grouped[theme.key] = { theme, articles: [] };
+    grouped[theme.key].articles.push(a);
+  });
+
+  // Sort groups by article count desc
+  const sorted = Object.values(grouped).sort((a,b) => b.articles.length - a.articles.length);
+
+  // Stats
+  const totalThemes = sorted.length;
+  const cutoffLabel = cutoffDate.toLocaleTimeString('en-AU',{timeZone:'Australia/Sydney',hour:'2-digit',minute:'2-digit',hour12:true});
+
+  let html = `
+    <div class="stats-bar">
+      <div class="stat"><span class="stat-num">${filtered.length}</span><span class="stat-label">Articles</span></div>
+      <div class="stat-divider"></div>
+      <div class="stat"><span class="stat-num">${totalThemes}</span><span class="stat-label">Themes</span></div>
+      <div class="stat-divider"></div>
+      <div class="stat"><span class="stat-num">${cutoffLabel}</span><span class="stat-label">Since (AEST)</span></div>
+    </div>
+  `;
+
+  sorted.forEach(({ theme, articles }, gi) => {
+    html += `
+      <div class="theme-group" style="animation-delay:${gi * 0.06}s">
+        <div class="theme-header">
+          <span style="font-size:18px">${theme.emoji}</span>
+          <span class="theme-tag">${theme.key}</span>
+          <span class="theme-count">${articles.length} article${articles.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="articles-grid">
+    `;
+
+    articles.forEach(a => {
+      const timeStr = formatSydneyTime(a.pubDate);
+      const catLabel = a.category || '';
+      html += `
+        <a class="article-card" href="${a.link}" target="_blank" rel="noopener">
+          <div class="article-body">
+            ${catLabel ? `<div class="article-category">${catLabel}</div>` : ''}
+            <div class="article-title">${a.title}</div>
+            ${a.description ? `<div class="article-summary">${a.description}${a.description.length >= 220 ? '…' : ''}</div>` : ''}
+          </div>
+          <div class="article-meta">
+            <span class="article-time">${timeStr}</span>
+            <span class="article-link-icon">↗</span>
+          </div>
+        </a>
+      `;
+    });
+
+    html += `</div></div>`;
+  });
+
+  content.innerHTML = html;
+}
+
+// ─── Main load ────────────────────────────────────────────────────────────────
+
+async function loadFeed() {
+  const statusEl = document.getElementById('status');
+  const contentEl = document.getElementById('content');
+  const loadBtn = document.getElementById('loadBtn');
+  const refreshBtn = document.getElementById('refreshBtn');
+  const cutoffInfo = document.getElementById('cutoff-info');
+
+  loadBtn.disabled = true;
+  contentEl.style.display = 'none';
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = `<div class="spinner"></div><h2>Fetching feed…</h2><p>Connecting to smh.com.au via CORS proxy</p>`;
+
+  try {
+    const { text, proxyIndex } = await fetchWithProxy(RSS_URL);
+    const articles = parseRSS(text);
+    const cutoff = getSydneyMidnight();
+
+    cutoffInfo.textContent = `via proxy ${proxyIndex + 1} · ${articles.length} total items`;
+
+    statusEl.style.display = 'none';
+    contentEl.style.display = 'block';
+    loadBtn.style.display = 'none';
+    refreshBtn.style.display = 'inline-block';
+
+    renderArticles(articles, cutoff);
+
+  } catch (err) {
+    statusEl.innerHTML = `
+      <span class="status-icon">⚠️</span>
+      <h2>Could not load feed</h2>
+      <p>All CORS proxies failed. This sometimes happens with network restrictions.</p>
+      <div class="cors-note" style="text-align:left;margin-top:20px">
+        <strong>Manual option</strong>
+        Open <code>smh.com.au/rss/feed.xml</code> in your browser, or add it to an RSS reader like <strong>Reeder</strong>, <strong>Feedly</strong>, or <strong>NetNewsWire</strong>.
+        <br><br>Error: ${err.message}
+      </div>
+    `;
+    loadBtn.disabled = false;
+  }
+}
+
+// Auto-update cutoff info
+setInterval(() => {
+  const d = document.getElementById('masthead-date');
+  if (d) d.innerHTML = sydneyDateLabel() + '<br>Sydney, Australia';
+}, 60000);
+</script>
+</body>
+</html>
