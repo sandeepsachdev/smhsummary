@@ -106,3 +106,19 @@ expects a different port and override `server.port` accordingly.
   reasoning note explaining what ties the articles together.
 - **Sections collapsed by default**, click to expand. (Web only — the email
   always shows everything expanded.)
+
+---
+
+## Prompts that built this
+
+Every prompt used during development, in order:
+
+1. *how are the summary generated in this web page*
+2. *can you build app in javascript which will use claude to give better grouping of articles and better one line summaries*
+3. *apply the filter to all articles in the smh feed not just the ones since midnight but do not include any sporting related articles*
+4. *only picking up 10 stories. think you are not going back far enough*
+5. *(screenshot attached) Fix the duplicate articles appearing*
+6. *Display some notes about the reasoning used to group articles on the page perhaps under each section*
+7. *Have each section collapsed by default and expandable if the user clicks on it.*
+8. *As well as generating the standalone html page add the same functionality as a Java spring web app which can be deployed easily to render with a Dockerfile. Each time the app starts up it should also send all information it displays online as an email using resend to send the emails*
+9. *Add all prompts to the readme*
