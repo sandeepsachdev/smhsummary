@@ -548,7 +548,7 @@ ${articleText}`;
 
   const body = {
     model: CLAUDE_MODEL,
-    max_tokens: 8000,
+    max_tokens: 16000,
     output_config: {
       format: {
         type: 'json_schema',
@@ -606,9 +606,26 @@ ${articleText}`;
   return JSON.parse(textBlock.text);
 }
 
-// ─── CORS proxy options ───────────────────────────────────────────────────────
+// ─── CORS proxy + multi-feed fetch ───────────────────────────────────────────
+// SMH's main feed.xml caps at ~20 top stories. To get real depth we pull
+// every non-sport section feed in parallel and dedupe by article URL.
 
-const RSS_URL = 'https://www.smh.com.au/rss/feed.xml';
+const RSS_FEEDS = [
+  'https://www.smh.com.au/rss/feed.xml',              // top stories
+  'https://www.smh.com.au/rss/national.xml',
+  'https://www.smh.com.au/rss/national/nsw.xml',
+  'https://www.smh.com.au/rss/politics/federal.xml',
+  'https://www.smh.com.au/rss/world.xml',
+  'https://www.smh.com.au/rss/business.xml',
+  'https://www.smh.com.au/rss/technology.xml',
+  'https://www.smh.com.au/rss/culture.xml',
+  'https://www.smh.com.au/rss/lifestyle.xml',
+  'https://www.smh.com.au/rss/opinion.xml',
+  'https://www.smh.com.au/rss/environment.xml',
+  'https://www.smh.com.au/rss/money.xml',
+  'https://www.smh.com.au/rss/property.xml',
+];
+
 const PROXIES = [
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
@@ -628,6 +645,35 @@ async function fetchWithProxy(url) {
       if (i === PROXIES.length - 1) throw e;
     }
   }
+}
+
+// Fetch every feed in parallel; tolerate individual failures.
+// Dedupes by link, sorts newest-first.
+async function fetchAllFeeds() {
+  const results = await Promise.allSettled(
+    RSS_FEEDS.map(url => fetchWithProxy(url).then(({ text }) => parseRSS(text)))
+  );
+
+  let succeeded = 0, failed = 0, total = 0;
+  const seen = new Set();
+  const unique = [];
+
+  for (const r of results) {
+    if (r.status === 'fulfilled') {
+      succeeded++;
+      for (const item of r.value) {
+        total++;
+        if (!item.link || seen.has(item.link)) continue;
+        seen.add(item.link);
+        unique.push(item);
+      }
+    } else {
+      failed++;
+    }
+  }
+
+  unique.sort((a, b) => b.pubDateObj - a.pubDateObj);
+  return { articles: unique, succeeded, failed, totalBeforeDedupe: total };
 }
 
 // ─── Render ──────────────────────────────────────────────────────────────────
@@ -722,15 +768,19 @@ async function loadFeed() {
   loadBtn.disabled = true;
   contentEl.style.display = 'none';
   statusEl.style.display = 'block';
-  statusEl.innerHTML = `<div class="spinner"></div><h2>Fetching feed…</h2><p>Connecting to smh.com.au via CORS proxy</p>`;
+  statusEl.innerHTML = `<div class="spinner"></div><h2>Fetching feeds…</h2><p>Pulling ${RSS_FEEDS.length} SMH section feeds in parallel via CORS proxy</p>`;
 
   try {
-    const { text, proxyIndex } = await fetchWithProxy(RSS_URL);
-    const articles = parseRSS(text);
+    const { articles, succeeded, failed, totalBeforeDedupe } = await fetchAllFeeds();
+    if (articles.length === 0) {
+      throw new Error(`All ${RSS_FEEDS.length} feeds failed to load`);
+    }
     const kept = articles.filter(a => !isSportArticle(a));
     const sportCount = articles.length - kept.length;
 
-    cutoffInfo.textContent = `via proxy ${proxyIndex + 1} · ${articles.length} total · ${sportCount} sport filtered`;
+    cutoffInfo.textContent =
+      `${succeeded}/${RSS_FEEDS.length} feeds · ${totalBeforeDedupe} raw · ${articles.length} unique · ${sportCount} sport filtered` +
+      (failed > 0 ? ` · ${failed} feed(s) failed` : '');
 
     // If a Claude key is available, ask Claude to summarise + group.
     // On any failure, fall back silently to the keyword classifier.
