@@ -407,7 +407,7 @@
 <header class="masthead">
   <div>
     <div class="masthead-title">SMH Briefing</div>
-    <div class="masthead-sub">Sydney Morning Herald — Since Midnight</div>
+    <div class="masthead-sub">Sydney Morning Herald — Full Feed, No Sport</div>
   </div>
   <div class="masthead-date" id="masthead-date"></div>
 </header>
@@ -424,30 +424,17 @@
   <div class="status" id="status">
     <span class="status-icon">📰</span>
     <h2>Ready to load</h2>
-    <p>Click <strong>Load Today's Articles</strong> to fetch the latest from the Sydney Morning Herald RSS feed published since midnight Sydney time.</p>
+    <p>Click <strong>Load Today's Articles</strong> to fetch the latest from the Sydney Morning Herald RSS feed. Sport articles are filtered out.</p>
   </div>
   <div id="content" style="display:none"></div>
 </main>
 
 <footer class="footer">
-  SMH RSS Reader &nbsp;·&nbsp; Articles since midnight AEST &nbsp;·&nbsp; Data from smh.com.au
+  SMH RSS Reader &nbsp;·&nbsp; Full feed, sport filtered &nbsp;·&nbsp; Data from smh.com.au
 </footer>
 
 <script>
 // ─── Date helpers ───────────────────────────────────────────────────────────
-
-function getSydneyMidnight() {
-  // Get current time in Sydney
-  const now = new Date();
-  const sydneyStr = now.toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
-  const sydneyNow = new Date(sydneyStr);
-  // Build midnight Sydney today
-  const midnight = new Date(sydneyNow);
-  midnight.setHours(0, 0, 0, 0);
-  // Convert back to UTC offset
-  const utcMidnight = new Date(midnight.getTime() - (sydneyNow.getTime() - now.getTime()));
-  return utcMidnight;
-}
 
 function formatSydneyTime(dateStr) {
   if (!dateStr) return '';
@@ -492,6 +479,18 @@ function classifyArticle(item) {
   return { key: 'Other', emoji: '📄', keywords: [] };
 }
 
+// ─── Sport filter ───────────────────────────────────────────────────────────
+// Reuse the Sport theme's keyword list, plus an explicit category-field check.
+
+const SPORT_KEYWORDS = THEMES.find(t => t.key === 'Sport').keywords;
+
+function isSportArticle(item) {
+  const cat = (item.category || '').toLowerCase();
+  if (cat.includes('sport')) return true;
+  const text = ((item.title || '') + ' ' + (item.description || '')).toLowerCase();
+  return SPORT_KEYWORDS.some(k => text.includes(k));
+}
+
 // ─── RSS parse ───────────────────────────────────────────────────────────────
 
 function parseRSS(xmlText) {
@@ -533,9 +532,9 @@ async function enrichWithClaude(articles, apiKey) {
     `[${i}] ${a.title}\n${a.description}`
   ).join('\n\n');
 
-  const prompt = `You are organizing today's Sydney Morning Herald briefing — ${articles.length} articles published since midnight Sydney time.
+  const prompt = `You are organizing a Sydney Morning Herald briefing — ${articles.length} articles from the current SMH feed. Sport articles have already been excluded; do not produce a sport theme.
 
-For each article, write a single concise sentence summary (max 22 words, factual, no marketing tone, no hedging like "reportedly"). Then group them into 4–9 coherent themes specific to today's news — themes should reflect what's actually happening today, not generic categories like "Politics" or "Sport". Each theme gets a short name (2–4 words) and one fitting emoji.
+For each article, write a single concise sentence summary (max 22 words, factual, no marketing tone, no hedging like "reportedly"). Then group them into 4–9 coherent themes specific to the news in this feed — themes should reflect what's actually being reported, not generic categories like "Politics". Each theme gets a short name (2–4 words) and one fitting emoji.
 
 Constraints:
 - Every article appears in exactly one theme
@@ -633,17 +632,15 @@ async function fetchWithProxy(url) {
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 
-function renderArticles(articles, cutoffDate, preGrouped) {
-  const filtered = articles.filter(a => a.pubDateObj >= cutoffDate);
+function renderArticles(articles, preGrouped) {
   const content = document.getElementById('content');
 
-  if (filtered.length === 0) {
+  if (articles.length === 0) {
     content.innerHTML = `
       <div class="status">
-        <span class="status-icon">🌅</span>
-        <h2>No new articles yet</h2>
-        <p>No articles found after midnight Sydney time (${cutoffDate.toLocaleTimeString('en-AU',{timeZone:'Australia/Sydney',hour:'2-digit',minute:'2-digit'})}).
-        The feed has ${articles.length} earlier articles — try refreshing in a moment.</p>
+        <span class="status-icon">📭</span>
+        <h2>Nothing to show</h2>
+        <p>The feed returned no non-sport articles. Try refreshing in a moment.</p>
       </div>`;
     return;
   }
@@ -655,7 +652,7 @@ function renderArticles(articles, cutoffDate, preGrouped) {
   } else {
     // Fallback: group by keyword classifier, sort by article count desc
     const grouped = {};
-    filtered.forEach(a => {
+    articles.forEach(a => {
       const theme = classifyArticle(a);
       if (!grouped[theme.key]) grouped[theme.key] = { theme, articles: [] };
       grouped[theme.key].articles.push(a);
@@ -665,15 +662,12 @@ function renderArticles(articles, cutoffDate, preGrouped) {
 
   // Stats
   const totalThemes = sorted.length;
-  const cutoffLabel = cutoffDate.toLocaleTimeString('en-AU',{timeZone:'Australia/Sydney',hour:'2-digit',minute:'2-digit',hour12:true});
 
   let html = `
     <div class="stats-bar">
-      <div class="stat"><span class="stat-num">${filtered.length}</span><span class="stat-label">Articles</span></div>
+      <div class="stat"><span class="stat-num">${articles.length}</span><span class="stat-label">Articles</span></div>
       <div class="stat-divider"></div>
       <div class="stat"><span class="stat-num">${totalThemes}</span><span class="stat-label">Themes</span></div>
-      <div class="stat-divider"></div>
-      <div class="stat"><span class="stat-num">${cutoffLabel}</span><span class="stat-label">Since (AEST)</span></div>
     </div>
   `;
 
@@ -733,26 +727,26 @@ async function loadFeed() {
   try {
     const { text, proxyIndex } = await fetchWithProxy(RSS_URL);
     const articles = parseRSS(text);
-    const cutoff = getSydneyMidnight();
-    const todaysArticles = articles.filter(a => a.pubDateObj >= cutoff);
+    const kept = articles.filter(a => !isSportArticle(a));
+    const sportCount = articles.length - kept.length;
 
-    cutoffInfo.textContent = `via proxy ${proxyIndex + 1} · ${articles.length} total items`;
+    cutoffInfo.textContent = `via proxy ${proxyIndex + 1} · ${articles.length} total · ${sportCount} sport filtered`;
 
     // If a Claude key is available, ask Claude to summarise + group.
     // On any failure, fall back silently to the keyword classifier.
     let claudeThemes = null;
     const apiKey = keyInput.value.trim();
-    if (apiKey && todaysArticles.length > 0) {
-      statusEl.innerHTML = `<div class="spinner"></div><h2>Claude is summarising…</h2><p>Reading ${todaysArticles.length} articles with ${CLAUDE_MODEL}</p>`;
+    if (apiKey && kept.length > 0) {
+      statusEl.innerHTML = `<div class="spinner"></div><h2>Claude is summarising…</h2><p>Reading ${kept.length} articles with ${CLAUDE_MODEL}</p>`;
       try {
-        const data = await enrichWithClaude(todaysArticles, apiKey);
-        todaysArticles.forEach((a, i) => {
+        const data = await enrichWithClaude(kept, apiKey);
+        kept.forEach((a, i) => {
           if (data.summaries[i]) a.aiSummary = data.summaries[i];
         });
         claudeThemes = data.themes.map(t => ({
           theme: { key: t.name, emoji: t.emoji },
           articles: t.article_indices
-            .map(i => todaysArticles[i])
+            .map(i => kept[i])
             .filter(Boolean),
         }));
         cutoffInfo.textContent += ` · AI-grouped`;
@@ -769,7 +763,7 @@ async function loadFeed() {
     loadBtn.style.display = 'none';
     refreshBtn.style.display = 'inline-block';
 
-    renderArticles(articles, cutoff, claudeThemes);
+    renderArticles(kept, claudeThemes);
 
   } catch (err) {
     statusEl.innerHTML = `
@@ -786,7 +780,7 @@ async function loadFeed() {
   }
 }
 
-// Auto-update cutoff info
+// Refresh the masthead date once a minute so it rolls over at midnight Sydney.
 setInterval(() => {
   const d = document.getElementById('masthead-date');
   if (d) d.innerHTML = sydneyDateLabel() + '<br>Sydney, Australia';
