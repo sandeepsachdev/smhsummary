@@ -648,7 +648,8 @@ async function fetchWithProxy(url) {
 }
 
 // Fetch every feed in parallel; tolerate individual failures.
-// Dedupes by link, sorts newest-first.
+// Dedupes by article slug (SMH URLs end in -p<digits><alpha>.html — that's
+// a unique article ID that survives tracking params and feed-specific URLs).
 async function fetchAllFeeds() {
   const results = await Promise.allSettled(
     RSS_FEEDS.map(url => fetchWithProxy(url).then(({ text }) => parseRSS(text)))
@@ -663,8 +664,9 @@ async function fetchAllFeeds() {
       succeeded++;
       for (const item of r.value) {
         total++;
-        if (!item.link || seen.has(item.link)) continue;
-        seen.add(item.link);
+        const key = articleKey(item.link);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
         unique.push(item);
       }
     } else {
@@ -674,6 +676,22 @@ async function fetchAllFeeds() {
 
   unique.sort((a, b) => b.pubDateObj - a.pubDateObj);
   return { articles: unique, succeeded, failed, totalBeforeDedupe: total };
+}
+
+// Stable per-article key for dedup across feeds.
+function articleKey(url) {
+  if (!url) return '';
+  // SMH article URLs end in something like "-p5n2x4.html" — that suffix is
+  // unique per article and survives tracking params / feed-source attribution.
+  const m = url.match(/-p\d+[a-z0-9]+\.html?\b/i);
+  if (m) return m[0].toLowerCase();
+  // Fallback: hostname + pathname, normalised.
+  try {
+    const u = new URL(url);
+    return (u.hostname + u.pathname).replace(/\/$/, '').toLowerCase();
+  } catch {
+    return url.split(/[?#]/)[0].replace(/\/$/, '').toLowerCase();
+  }
 }
 
 // ─── Render ──────────────────────────────────────────────────────────────────
@@ -793,9 +811,17 @@ async function loadFeed() {
         kept.forEach((a, i) => {
           if (data.summaries[i]) a.aiSummary = data.summaries[i];
         });
+        // Guard against Claude assigning an article to more than one theme:
+        // each article appears only in the first theme that claims it.
+        const claimed = new Set();
         claudeThemes = data.themes.map(t => ({
           theme: { key: t.name, emoji: t.emoji },
           articles: t.article_indices
+            .filter(i => {
+              if (claimed.has(i)) return false;
+              claimed.add(i);
+              return true;
+            })
             .map(i => kept[i])
             .filter(Boolean),
         }));
