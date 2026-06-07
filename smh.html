@@ -124,6 +124,20 @@
   .btn:hover { background: var(--accent); border-color: var(--accent); }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+  .key-input {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    padding: 8px 10px;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--ink);
+    width: 260px;
+    letter-spacing: 0.04em;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .key-input:focus { border-color: var(--ink); }
+
   .btn-ghost {
     background: transparent;
     color: var(--ink);
@@ -399,7 +413,8 @@
 </header>
 
 <div class="controls">
-  <label>Feed</label>
+  <label for="apiKey">Claude key</label>
+  <input type="password" id="apiKey" class="key-input" placeholder="sk-ant-... (optional)" autocomplete="off" />
   <button class="btn" id="loadBtn" onclick="loadFeed()">Load Today's Articles</button>
   <button class="btn btn-ghost" id="refreshBtn" onclick="loadFeed()" style="display:none">↺ Refresh</button>
   <span class="cutoff-info" id="cutoff-info"></span>
@@ -498,6 +513,100 @@ function parseRSS(xmlText) {
   });
 }
 
+// ─── Claude enrichment ───────────────────────────────────────────────────────
+
+const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+const CLAUDE_MODEL = 'claude-haiku-4-5';
+
+// Persist the API key in localStorage so users don't re-enter it every load.
+const keyInput = document.getElementById('apiKey');
+const savedKey = localStorage.getItem('claudeApiKey');
+if (savedKey) keyInput.value = savedKey;
+keyInput.addEventListener('change', () => {
+  const v = keyInput.value.trim();
+  if (v) localStorage.setItem('claudeApiKey', v);
+  else localStorage.removeItem('claudeApiKey');
+});
+
+async function enrichWithClaude(articles, apiKey) {
+  const articleText = articles.map((a, i) =>
+    `[${i}] ${a.title}\n${a.description}`
+  ).join('\n\n');
+
+  const prompt = `You are organizing today's Sydney Morning Herald briefing — ${articles.length} articles published since midnight Sydney time.
+
+For each article, write a single concise sentence summary (max 22 words, factual, no marketing tone, no hedging like "reportedly"). Then group them into 4–9 coherent themes specific to today's news — themes should reflect what's actually happening today, not generic categories like "Politics" or "Sport". Each theme gets a short name (2–4 words) and one fitting emoji.
+
+Constraints:
+- Every article appears in exactly one theme
+- article_indices are 0-indexed into the input list below
+- summaries array length must equal ${articles.length}, in input order
+- Within a theme, order articles by importance (lead story first)
+- Order themes by significance (biggest story of the day first)
+
+Articles:
+${articleText}`;
+
+  const body = {
+    model: CLAUDE_MODEL,
+    max_tokens: 8000,
+    output_config: {
+      format: {
+        type: 'json_schema',
+        schema: {
+          type: 'object',
+          properties: {
+            summaries: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            themes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  emoji: { type: 'string' },
+                  article_indices: {
+                    type: 'array',
+                    items: { type: 'integer' }
+                  }
+                },
+                required: ['name', 'emoji', 'article_indices'],
+                additionalProperties: false
+              }
+            }
+          },
+          required: ['summaries', 'themes'],
+          additionalProperties: false
+        }
+      }
+    },
+    messages: [{ role: 'user', content: prompt }]
+  };
+
+  const res = await fetch(CLAUDE_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`HTTP ${res.status}: ${errText.slice(0, 300)}`);
+  }
+
+  const data = await res.json();
+  const textBlock = (data.content || []).find(b => b.type === 'text');
+  if (!textBlock) throw new Error('No text block in Claude response');
+  return JSON.parse(textBlock.text);
+}
+
 // ─── CORS proxy options ───────────────────────────────────────────────────────
 
 const RSS_URL = 'https://www.smh.com.au/rss/feed.xml';
@@ -524,7 +633,7 @@ async function fetchWithProxy(url) {
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 
-function renderArticles(articles, cutoffDate) {
+function renderArticles(articles, cutoffDate, preGrouped) {
   const filtered = articles.filter(a => a.pubDateObj >= cutoffDate);
   const content = document.getElementById('content');
 
@@ -533,22 +642,26 @@ function renderArticles(articles, cutoffDate) {
       <div class="status">
         <span class="status-icon">🌅</span>
         <h2>No new articles yet</h2>
-        <p>No articles found after midnight Sydney time (${cutoffDate.toLocaleTimeString('en-AU',{timeZone:'Australia/Sydney',hour:'2-digit',minute:'2-digit'})}). 
+        <p>No articles found after midnight Sydney time (${cutoffDate.toLocaleTimeString('en-AU',{timeZone:'Australia/Sydney',hour:'2-digit',minute:'2-digit'})}).
         The feed has ${articles.length} earlier articles — try refreshing in a moment.</p>
       </div>`;
     return;
   }
 
-  // Group by theme
-  const grouped = {};
-  filtered.forEach(a => {
-    const theme = classifyArticle(a);
-    if (!grouped[theme.key]) grouped[theme.key] = { theme, articles: [] };
-    grouped[theme.key].articles.push(a);
-  });
-
-  // Sort groups by article count desc
-  const sorted = Object.values(grouped).sort((a,b) => b.articles.length - a.articles.length);
+  let sorted;
+  if (preGrouped) {
+    // Use Claude-supplied themes (already ordered by significance)
+    sorted = preGrouped;
+  } else {
+    // Fallback: group by keyword classifier, sort by article count desc
+    const grouped = {};
+    filtered.forEach(a => {
+      const theme = classifyArticle(a);
+      if (!grouped[theme.key]) grouped[theme.key] = { theme, articles: [] };
+      grouped[theme.key].articles.push(a);
+    });
+    sorted = Object.values(grouped).sort((a,b) => b.articles.length - a.articles.length);
+  }
 
   // Stats
   const totalThemes = sorted.length;
@@ -578,12 +691,16 @@ function renderArticles(articles, cutoffDate) {
     articles.forEach(a => {
       const timeStr = formatSydneyTime(a.pubDate);
       const catLabel = a.category || '';
+      // Prefer Claude's one-line summary; fall back to the RSS description.
+      const summaryText = a.aiSummary
+        ? a.aiSummary
+        : (a.description ? a.description + (a.description.length >= 220 ? '…' : '') : '');
       html += `
         <a class="article-card" href="${a.link}" target="_blank" rel="noopener">
           <div class="article-body">
             ${catLabel ? `<div class="article-category">${catLabel}</div>` : ''}
             <div class="article-title">${a.title}</div>
-            ${a.description ? `<div class="article-summary">${a.description}${a.description.length >= 220 ? '…' : ''}</div>` : ''}
+            ${summaryText ? `<div class="article-summary">${summaryText}</div>` : ''}
           </div>
           <div class="article-meta">
             <span class="article-time">${timeStr}</span>
@@ -617,15 +734,42 @@ async function loadFeed() {
     const { text, proxyIndex } = await fetchWithProxy(RSS_URL);
     const articles = parseRSS(text);
     const cutoff = getSydneyMidnight();
+    const todaysArticles = articles.filter(a => a.pubDateObj >= cutoff);
 
     cutoffInfo.textContent = `via proxy ${proxyIndex + 1} · ${articles.length} total items`;
+
+    // If a Claude key is available, ask Claude to summarise + group.
+    // On any failure, fall back silently to the keyword classifier.
+    let claudeThemes = null;
+    const apiKey = keyInput.value.trim();
+    if (apiKey && todaysArticles.length > 0) {
+      statusEl.innerHTML = `<div class="spinner"></div><h2>Claude is summarising…</h2><p>Reading ${todaysArticles.length} articles with ${CLAUDE_MODEL}</p>`;
+      try {
+        const data = await enrichWithClaude(todaysArticles, apiKey);
+        todaysArticles.forEach((a, i) => {
+          if (data.summaries[i]) a.aiSummary = data.summaries[i];
+        });
+        claudeThemes = data.themes.map(t => ({
+          theme: { key: t.name, emoji: t.emoji },
+          articles: t.article_indices
+            .map(i => todaysArticles[i])
+            .filter(Boolean),
+        }));
+        cutoffInfo.textContent += ` · AI-grouped`;
+      } catch (e) {
+        console.warn('Claude enrichment failed:', e);
+        cutoffInfo.textContent += ` · AI failed (${e.message.slice(0, 60)})`;
+      }
+    } else if (!apiKey) {
+      cutoffInfo.textContent += ` · no key — using keyword grouping`;
+    }
 
     statusEl.style.display = 'none';
     contentEl.style.display = 'block';
     loadBtn.style.display = 'none';
     refreshBtn.style.display = 'inline-block';
 
-    renderArticles(articles, cutoff);
+    renderArticles(articles, cutoff, claudeThemes);
 
   } catch (err) {
     statusEl.innerHTML = `
