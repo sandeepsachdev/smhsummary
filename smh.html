@@ -272,6 +272,31 @@
     color: var(--ink-faint);
   }
 
+  .theme-reasoning {
+    font-family: 'Source Serif 4', Georgia, serif;
+    font-size: 13px;
+    font-style: italic;
+    line-height: 1.6;
+    color: var(--ink-soft);
+    padding: 10px 14px;
+    margin: -6px 0 14px;
+    background: var(--paper-warm);
+    border-left: 2px solid var(--gold);
+    position: relative;
+  }
+
+  .theme-reasoning::before {
+    content: 'Editor\'s note';
+    display: block;
+    font-family: 'DM Mono', monospace;
+    font-style: normal;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 4px;
+  }
+
   /* ARTICLE CARD */
   .articles-grid {
     display: flex;
@@ -534,7 +559,7 @@ async function enrichWithClaude(articles, apiKey) {
 
   const prompt = `You are organizing a Sydney Morning Herald briefing — ${articles.length} articles from the current SMH feed. Sport articles have already been excluded; do not produce a sport theme.
 
-For each article, write a single concise sentence summary (max 22 words, factual, no marketing tone, no hedging like "reportedly"). Then group them into 4–9 coherent themes specific to the news in this feed — themes should reflect what's actually being reported, not generic categories like "Politics". Each theme gets a short name (2–4 words) and one fitting emoji.
+For each article, write a single concise sentence summary (max 22 words, factual, no marketing tone, no hedging like "reportedly"). Then group them into 4–9 coherent themes specific to the news in this feed — themes should reflect what's actually being reported, not generic categories like "Politics". Each theme gets a short name (2–4 words), one fitting emoji, and a brief reasoning note (one sentence, 15–30 words) explaining what ties these articles together — the narrative thread or shared subject, not a recap.
 
 Constraints:
 - Every article appears in exactly one theme
@@ -566,12 +591,13 @@ ${articleText}`;
                 properties: {
                   name: { type: 'string' },
                   emoji: { type: 'string' },
+                  reasoning: { type: 'string' },
                   article_indices: {
                     type: 'array',
                     items: { type: 'integer' }
                   }
                 },
-                required: ['name', 'emoji', 'article_indices'],
+                required: ['name', 'emoji', 'reasoning', 'article_indices'],
                 additionalProperties: false
               }
             }
@@ -743,6 +769,7 @@ function renderArticles(articles, preGrouped) {
           <span class="theme-tag">${theme.key}</span>
           <span class="theme-count">${articles.length} article${articles.length !== 1 ? 's' : ''}</span>
         </div>
+        ${theme.reasoning ? `<div class="theme-reasoning">${theme.reasoning}</div>` : ''}
         <div class="articles-grid">
     `;
 
@@ -815,7 +842,7 @@ async function loadFeed() {
         // each article appears only in the first theme that claims it.
         const claimed = new Set();
         claudeThemes = data.themes.map(t => ({
-          theme: { key: t.name, emoji: t.emoji },
+          theme: { key: t.name, emoji: t.emoji, reasoning: t.reasoning },
           articles: t.article_indices
             .filter(i => {
               if (claimed.has(i)) return false;
