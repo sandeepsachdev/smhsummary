@@ -238,8 +238,11 @@
 
   /* THEME GROUP */
   .theme-group {
-    margin-bottom: 52px;
+    margin-bottom: 20px;
     animation: fadeUp 0.4s ease both;
+  }
+  .theme-group[open] {
+    margin-bottom: 52px;
   }
 
   @keyframes fadeUp {
@@ -251,10 +254,30 @@
     display: flex;
     align-items: center;
     gap: 14px;
-    margin-bottom: 20px;
     padding-bottom: 12px;
     border-bottom: 1.5px solid var(--rule);
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    transition: border-color 0.15s;
   }
+  .theme-header::-webkit-details-marker { display: none; }
+  .theme-header:hover { border-bottom-color: var(--ink); }
+  .theme-header:hover .theme-tag { background: var(--accent); }
+
+  .theme-group[open] .theme-header {
+    margin-bottom: 20px;
+  }
+
+  .expand-icon {
+    margin-left: auto;
+    font-family: 'DM Mono', monospace;
+    font-size: 14px;
+    color: var(--ink-faint);
+    transition: transform 0.2s ease, color 0.15s;
+  }
+  .theme-header:hover .expand-icon { color: var(--ink); }
+  .theme-group[open] .expand-icon { transform: rotate(180deg); }
 
   .theme-tag {
     font-family: 'DM Mono', monospace;
@@ -763,12 +786,13 @@ function renderArticles(articles, preGrouped) {
 
   sorted.forEach(({ theme, articles }, gi) => {
     html += `
-      <div class="theme-group" style="animation-delay:${gi * 0.06}s">
-        <div class="theme-header">
+      <details class="theme-group" style="animation-delay:${gi * 0.06}s">
+        <summary class="theme-header">
           <span style="font-size:18px">${theme.emoji}</span>
           <span class="theme-tag">${theme.key}</span>
           <span class="theme-count">${articles.length} article${articles.length !== 1 ? 's' : ''}</span>
-        </div>
+          <span class="expand-icon" aria-hidden="true">▾</span>
+        </summary>
         ${theme.reasoning ? `<div class="theme-reasoning">${theme.reasoning}</div>` : ''}
         <div class="articles-grid">
     `;
@@ -795,7 +819,7 @@ function renderArticles(articles, preGrouped) {
       `;
     });
 
-    html += `</div></div>`;
+    html += `</div></details>`;
   });
 
   content.innerHTML = html;
