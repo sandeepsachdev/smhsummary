@@ -100,8 +100,9 @@ public class BriefingService {
    */
   public String renderWeb(Instant since) {
     Briefing b = getCachedOrBuild();
+    ClaudeService.UsageStats usage = claudeService.getLastUsage();
     if (since == null) {
-      return renderer.renderPage(b.articles(), b.claude(), b.fetch(), null, b.articleCount());
+      return renderer.renderPage(b.articles(), b.claude(), b.fetch(), null, b.articleCount(), usage);
     }
 
     List<Article> filtered = new ArrayList<>();
@@ -111,7 +112,7 @@ public class BriefingService {
       }
     }
     ClaudeService.BriefingResponse remapped = remapClaudeForFilter(b.claude(), b.articles(), filtered);
-    return renderer.renderPage(filtered, remapped, b.fetch(), since, b.articleCount());
+    return renderer.renderPage(filtered, remapped, b.fetch(), since, b.articleCount(), usage);
   }
 
   /**

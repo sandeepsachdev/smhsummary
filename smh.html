@@ -236,6 +236,31 @@
     background: var(--rule);
   }
 
+  /* Claude usage bar — per-call, cumulative, rate-limit */
+  .usage-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    padding: 14px 16px;
+    margin: 0 0 24px;
+    background: var(--paper-warm);
+    border-left: 3px solid var(--gold);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+  }
+  .usage-item { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .usage-label {
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+  .usage-value {
+    color: var(--ink);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
   /* THEME GROUP */
   .theme-group {
     margin-bottom: 20px;
@@ -652,7 +677,69 @@ ${articleText}`;
   const data = await res.json();
   const textBlock = (data.content || []).find(b => b.type === 'text');
   if (!textBlock) throw new Error('No text block in Claude response');
-  return JSON.parse(textBlock.text);
+
+  // Extract usage + rate-limit metadata so the page can show what this
+  // call cost and what's left in the current rate-limit window.
+  const usage = {
+    inputTokens: data.usage?.input_tokens ?? 0,
+    outputTokens: data.usage?.output_tokens ?? 0,
+    rateLimitTokensRemaining: parseInt(res.headers.get('anthropic-ratelimit-tokens-remaining'), 10) || null,
+    rateLimitTokensLimit: parseInt(res.headers.get('anthropic-ratelimit-tokens-limit'), 10) || null,
+    rateLimitTokensReset: res.headers.get('anthropic-ratelimit-tokens-reset') || null,
+  };
+
+  return { briefing: JSON.parse(textBlock.text), usage };
+}
+
+// ─── Usage / cost tracking ───────────────────────────────────────────────────
+
+const CLAUDE_PRICING = {
+  inputUsdPerM: 1.0,   // Haiku 4.5 input pricing
+  outputUsdPerM: 5.0,  // Haiku 4.5 output pricing
+};
+
+function costUsd(inputTokens, outputTokens) {
+  return (inputTokens / 1_000_000) * CLAUDE_PRICING.inputUsdPerM
+       + (outputTokens / 1_000_000) * CLAUDE_PRICING.outputUsdPerM;
+}
+
+function bumpCumulative(usage) {
+  const prevIn = parseInt(localStorage.getItem('claudeCumInputTokens') || '0', 10);
+  const prevOut = parseInt(localStorage.getItem('claudeCumOutputTokens') || '0', 10);
+  const newIn = prevIn + usage.inputTokens;
+  const newOut = prevOut + usage.outputTokens;
+  localStorage.setItem('claudeCumInputTokens', String(newIn));
+  localStorage.setItem('claudeCumOutputTokens', String(newOut));
+  return { inputTokens: newIn, outputTokens: newOut, costUsd: costUsd(newIn, newOut) };
+}
+
+function fmtTokens(n) { return n.toLocaleString('en-AU'); }
+function fmtCost(n) { return '$' + n.toFixed(4); }
+function fmtRateLimit(u) {
+  if (!u.rateLimitTokensRemaining || !u.rateLimitTokensLimit) return '— (not reported)';
+  const pct = Math.round(100 * u.rateLimitTokensRemaining / u.rateLimitTokensLimit);
+  let s = `${fmtTokens(u.rateLimitTokensRemaining)} / ${fmtTokens(u.rateLimitTokensLimit)} (${pct}%)`;
+  if (u.rateLimitTokensReset) {
+    const d = new Date(u.rateLimitTokensReset);
+    if (!isNaN(d.getTime())) {
+      s += ' · resets ' + d.toLocaleTimeString('en-AU', {
+        timeZone: 'Australia/Sydney', hour: '2-digit', minute: '2-digit', hour12: true
+      });
+    }
+  }
+  return s;
+}
+
+function renderUsageBar(usage, cumulative) {
+  const callLine = `${fmtTokens(usage.inputTokens)} in · ${fmtTokens(usage.outputTokens)} out · ${fmtCost(costUsd(usage.inputTokens, usage.outputTokens))}`;
+  const cumLine = `${fmtTokens(cumulative.inputTokens)} in · ${fmtTokens(cumulative.outputTokens)} out · ${fmtCost(cumulative.costUsd)}`;
+  const limitLine = fmtRateLimit(usage);
+  return `
+    <div class="usage-bar">
+      <div class="usage-item"><span class="usage-label">This call</span><span class="usage-value">${callLine}</span></div>
+      <div class="usage-item"><span class="usage-label">Cumulative (this browser)</span><span class="usage-value">${cumLine}</span></div>
+      <div class="usage-item"><span class="usage-label">Rate-limit (tokens this window)</span><span class="usage-value">${limitLine}</span></div>
+    </div>`;
 }
 
 // ─── CORS proxy + multi-feed fetch ───────────────────────────────────────────
@@ -745,7 +832,7 @@ function articleKey(url) {
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 
-function renderArticles(articles, preGrouped) {
+function renderArticles(articles, preGrouped, usageBarHtml) {
   const content = document.getElementById('content');
 
   if (articles.length === 0) {
@@ -784,6 +871,7 @@ function renderArticles(articles, preGrouped) {
       <div class="stat-divider"></div>
       <div class="stat"><span class="stat-num">${totalThemes}</span><span class="stat-label">Themes</span></div>
     </div>
+    ${usageBarHtml || ''}
   `;
 
   sorted.forEach(({ theme, articles }, gi) => {
@@ -911,18 +999,19 @@ async function loadFeed() {
     // If a Claude key is available, ask Claude to summarise + group.
     // On any failure, fall back silently to the keyword classifier.
     let claudeThemes = null;
+    let usageBarHtml = '';
     const apiKey = keyInput.value.trim();
     if (apiKey && kept.length > 0) {
       statusEl.innerHTML = `<div class="spinner"></div><h2>Claude is summarising…</h2><p>Reading ${kept.length} articles with ${CLAUDE_MODEL}</p>`;
       try {
-        const data = await enrichWithClaude(kept, apiKey);
+        const { briefing, usage } = await enrichWithClaude(kept, apiKey);
         kept.forEach((a, i) => {
-          if (data.summaries[i]) a.aiSummary = data.summaries[i];
+          if (briefing.summaries[i]) a.aiSummary = briefing.summaries[i];
         });
         // Guard against Claude assigning an article to more than one theme:
         // each article appears only in the first theme that claims it.
         const claimed = new Set();
-        claudeThemes = data.themes.map(t => ({
+        claudeThemes = briefing.themes.map(t => ({
           theme: { key: t.name, emoji: t.emoji, reasoning: t.reasoning },
           articles: t.article_indices
             .filter(i => {
@@ -934,6 +1023,8 @@ async function loadFeed() {
             .filter(Boolean)
             .sort((a, b) => b.pubDateObj - a.pubDateObj),
         }));
+        const cumulative = bumpCumulative(usage);
+        usageBarHtml = renderUsageBar(usage, cumulative);
         cutoffInfo.innerHTML += ` · AI-grouped`;
       } catch (e) {
         console.warn('Claude enrichment failed:', e);
@@ -948,7 +1039,7 @@ async function loadFeed() {
     loadBtn.style.display = 'none';
     refreshBtn.style.display = 'inline-block';
 
-    renderArticles(kept, claudeThemes);
+    renderArticles(kept, claudeThemes, usageBarHtml);
 
     // Successful render — remember this moment so the next load shows
     // only articles published after it.

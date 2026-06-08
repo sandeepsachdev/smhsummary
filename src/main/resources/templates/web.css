@@ -289,6 +289,31 @@ body::before {
   border-top: 1px solid var(--rule);
 }
 
+/* Claude usage bar: per-call, cumulative, rate-limit. */
+.usage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 14px 16px;
+  margin: 0 0 24px;
+  background: var(--paper-warm);
+  border-left: 3px solid var(--gold);
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+}
+.usage-item { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.usage-label {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.usage-value {
+  color: var(--ink);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
 /* Since-last-run banner — rendered server-side when ?since= is in the URL. */
 .since-banner {
   background: var(--paper-warm);

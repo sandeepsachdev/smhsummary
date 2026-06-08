@@ -8,14 +8,28 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.lang.reflect.Method;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 public class ClaudeService {
   private static final Logger log = LoggerFactory.getLogger(ClaudeService.class);
   private static final String MODEL = "claude-haiku-4-5";
 
+  // Haiku 4.5 pricing (USD per 1M tokens). Update when Anthropic changes prices.
+  private static final double INPUT_USD_PER_M = 1.0;
+  private static final double OUTPUT_USD_PER_M = 5.0;
+
   private final AnthropicClient client;
+
+  // Cumulative usage since process start. Resets on JVM restart.
+  private final AtomicLong cumulativeInputTokens = new AtomicLong();
+  private final AtomicLong cumulativeOutputTokens = new AtomicLong();
+  private volatile UsageStats lastUsage;
 
   public ClaudeService(@Value("${anthropic.api-key:}") String apiKey) {
     if (apiKey != null && !apiKey.isBlank()) {
@@ -31,9 +45,7 @@ public class ClaudeService {
     return client != null;
   }
 
-  // Snake_case field name so the auto-derived JSON schema matches the
-  // shape Claude naturally returns for the briefing — saves us depending
-  // on @JsonProperty being honoured by the SDK's schema generator.
+  // Snake_case so the auto-derived JSON schema matches what Claude returns.
   public record ThemeGroup(
       String name,
       String emoji,
@@ -45,6 +57,25 @@ public class ClaudeService {
       List<String> summaries,
       List<ThemeGroup> themes
   ) {}
+
+  /**
+   * Token + cost snapshot from the most recent Claude call plus the
+   * cumulative totals since process start. Rate-limit fields come from
+   * Anthropic's response headers; they're null when not available.
+   */
+  public record UsageStats(
+      long lastInputTokens,
+      long lastOutputTokens,
+      double lastCostUsd,
+      long cumulativeInputTokens,
+      long cumulativeOutputTokens,
+      double cumulativeCostUsd,
+      Long rateLimitTokensRemaining,
+      Long rateLimitTokensLimit,
+      Instant rateLimitTokensReset
+  ) {}
+
+  public UsageStats getLastUsage() { return lastUsage; }
 
   public BriefingResponse summariseAndGroup(List<Article> articles) {
     if (client == null) {
@@ -61,13 +92,126 @@ public class ClaudeService {
         .build();
 
     log.info("Calling Claude {} for {} articles", MODEL, articles.size());
+
+    // Use the typed create() — the response object carries the parsed
+    // BriefingResponse via .content().stream() and also exposes .usage().
     var response = client.messages().create(params);
 
-    return response.content().stream()
+    BriefingResponse parsed = response.content().stream()
         .flatMap(cb -> cb.text().stream())
         .findFirst()
         .map(typed -> typed.text())
         .orElseThrow(() -> new RuntimeException("Claude returned no parsed structured output"));
+
+    long inputTokens = readLong(response, "usage", "inputTokens");
+    long outputTokens = readLong(response, "usage", "outputTokens");
+
+    long cumIn = cumulativeInputTokens.addAndGet(inputTokens);
+    long cumOut = cumulativeOutputTokens.addAndGet(outputTokens);
+    double callCost = costUsd(inputTokens, outputTokens);
+    double cumCost = costUsd(cumIn, cumOut);
+
+    // Rate-limit headers come from the underlying HTTP response. The
+    // structured-outputs return type may or may not expose them
+    // directly — try a couple of accessors via reflection and fall
+    // back to nulls if the SDK doesn't surface them on this code path.
+    Long limitRemaining = parseLong(headerFromResponse(response, "anthropic-ratelimit-tokens-remaining"));
+    Long limitTotal = parseLong(headerFromResponse(response, "anthropic-ratelimit-tokens-limit"));
+    Instant limitReset = parseInstantOrNull(headerFromResponse(response, "anthropic-ratelimit-tokens-reset"));
+
+    this.lastUsage = new UsageStats(
+        inputTokens, outputTokens, callCost,
+        cumIn, cumOut, cumCost,
+        limitRemaining, limitTotal, limitReset);
+
+    log.info("Claude usage: this call in={} out={} cost=${} · cumulative in={} out={} cost=${} · limit remaining={}/{}",
+        inputTokens, outputTokens, String.format("%.5f", callCost),
+        cumIn, cumOut, String.format("%.5f", cumCost),
+        limitRemaining, limitTotal);
+
+    return parsed;
+  }
+
+  // --- Defensive accessors --------------------------------------------------
+  // The Anthropic Java SDK's structured-outputs return type is not the plain
+  // Message class, so its exact method surface can drift between SDK
+  // versions. Walk it reflectively so a missing accessor degrades to
+  // "unknown" instead of a hard compile failure. If/when a stable typed API
+  // for headers + usage on structured responses lands, replace these.
+
+  private static long readLong(Object root, String... path) {
+    Object cur = root;
+    for (String name : path) {
+      cur = invokeNoArgs(cur, name);
+      if (cur == null) return 0L;
+    }
+    if (cur instanceof Number n) return n.longValue();
+    if (cur instanceof Optional<?> o && o.isPresent() && o.get() instanceof Number n) return n.longValue();
+    return 0L;
+  }
+
+  private static String headerFromResponse(Object response, String headerName) {
+    // Try common patterns: response._headers(), response.headers(), or
+    // response.metadata().get(...). All are best-effort.
+    for (String accessor : new String[]{"headers", "_headers", "responseHeaders"}) {
+      Object headers = invokeNoArgs(response, accessor);
+      if (headers == null) continue;
+      String value = readHeader(headers, headerName);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  private static String readHeader(Object headers, String name) {
+    // values(String) -> List<String>
+    Object listResult = invokeOneArg(headers, "values", name);
+    if (listResult instanceof List<?> list && !list.isEmpty()) {
+      return String.valueOf(list.get(0));
+    }
+    // firstValue(String) -> Optional<String>
+    Object optResult = invokeOneArg(headers, "firstValue", name);
+    if (optResult instanceof Optional<?> opt && opt.isPresent()) {
+      return String.valueOf(opt.get());
+    }
+    // get(String) -> String (less common)
+    Object directResult = invokeOneArg(headers, "get", name);
+    if (directResult != null) return String.valueOf(directResult);
+    return null;
+  }
+
+  private static Object invokeNoArgs(Object target, String methodName) {
+    if (target == null) return null;
+    try {
+      Method m = target.getClass().getMethod(methodName);
+      return m.invoke(target);
+    } catch (ReflectiveOperationException e) {
+      return null;
+    }
+  }
+
+  private static Object invokeOneArg(Object target, String methodName, Object arg) {
+    if (target == null) return null;
+    try {
+      Method m = target.getClass().getMethod(methodName, String.class);
+      return m.invoke(target, arg);
+    } catch (ReflectiveOperationException e) {
+      return null;
+    }
+  }
+
+  private Long parseLong(String s) {
+    if (s == null || s.isBlank()) return null;
+    try { return Long.parseLong(s.trim()); } catch (NumberFormatException e) { return null; }
+  }
+
+  private Instant parseInstantOrNull(String s) {
+    if (s == null || s.isBlank()) return null;
+    try { return Instant.parse(s.trim()); } catch (DateTimeParseException e) { return null; }
+  }
+
+  private static double costUsd(long inputTokens, long outputTokens) {
+    return (inputTokens / 1_000_000.0) * INPUT_USD_PER_M
+        + (outputTokens / 1_000_000.0) * OUTPUT_USD_PER_M;
   }
 
   private String buildPrompt(List<Article> articles) {

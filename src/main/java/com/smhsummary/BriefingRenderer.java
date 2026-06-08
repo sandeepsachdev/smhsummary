@@ -98,7 +98,8 @@ public class BriefingRenderer {
   }
 
   public String renderPage(List<Article> articles, ClaudeService.BriefingResponse claude,
-                           FeedService.FetchResult fetch, Instant since, int totalAvailable) {
+                           FeedService.FetchResult fetch, Instant since, int totalAvailable,
+                           ClaudeService.UsageStats usage) {
     List<ThemeView> groups = groupArticles(articles, claude);
     Instant now = Instant.now();
 
@@ -151,6 +152,21 @@ public class BriefingRenderer {
         .append(escape(LAST_BUILT.format(now))).append("</span>")
         .append("<span class=\"stat-label\">Last built (AEST)</span></div>\n")
         .append("</div>\n");
+
+    // Usage bar — per-call, cumulative, and rate-limit info from Anthropic.
+    if (usage != null) {
+      sb.append("<div class=\"usage-bar\">\n");
+      sb.append(usageCell("This call",
+          formatTokens(usage.lastInputTokens()) + " in · " +
+          formatTokens(usage.lastOutputTokens()) + " out · " +
+          formatCost(usage.lastCostUsd())));
+      sb.append(usageCell("Cumulative (since startup)",
+          formatTokens(usage.cumulativeInputTokens()) + " in · " +
+          formatTokens(usage.cumulativeOutputTokens()) + " out · " +
+          formatCost(usage.cumulativeCostUsd())));
+      sb.append(usageCell("Rate-limit (tokens this window)", formatRateLimit(usage)));
+      sb.append("</div>\n");
+    }
 
     // Since-banner (server-rendered when ?since= was in the URL)
     if (since != null) {
@@ -412,6 +428,37 @@ public class BriefingRenderer {
   private String formatTime(Instant pubDate) {
     if (pubDate == null || pubDate.equals(Instant.EPOCH)) return "—";
     return TIME_LABEL.format(pubDate);
+  }
+
+  private static String usageCell(String label, String value) {
+    return "  <div class=\"usage-item\"><span class=\"usage-label\">" + escape(label)
+        + "</span><span class=\"usage-value\">" + escape(value) + "</span></div>\n";
+  }
+
+  private static String formatTokens(long n) {
+    return String.format(Locale.ENGLISH, "%,d", n);
+  }
+
+  private static String formatCost(double usd) {
+    // Costs are tiny — show 4 decimals so $0.0042 doesn't round to $0.00.
+    return String.format(Locale.ENGLISH, "$%.4f", usd);
+  }
+
+  private static String formatRateLimit(ClaudeService.UsageStats u) {
+    if (u.rateLimitTokensRemaining() == null || u.rateLimitTokensLimit() == null) {
+      return "— (not reported)";
+    }
+    long remaining = u.rateLimitTokensRemaining();
+    long limit = u.rateLimitTokensLimit();
+    double pct = limit > 0 ? 100.0 * remaining / limit : 0;
+    String base = String.format(Locale.ENGLISH, "%,d / %,d (%.0f%%)", remaining, limit, pct);
+    if (u.rateLimitTokensReset() != null) {
+      base += " · resets " + DateTimeFormatter
+          .ofPattern("hh:mm a", Locale.ENGLISH)
+          .withZone(SYDNEY)
+          .format(u.rateLimitTokensReset());
+    }
+    return base;
   }
 
   /** Sydney-local label used in the since-banner: e.g. "8 Jun, 07:08 am". */
