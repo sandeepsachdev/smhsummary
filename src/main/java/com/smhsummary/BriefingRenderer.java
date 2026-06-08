@@ -90,6 +90,84 @@ public class BriefingRenderer {
       </script>
       """;
 
+  /**
+   * Client-side age filter driven by the range slider near the top of
+   * the page. Reads {@code data-pubdate} from each article card, hides
+   * cards older than the slider's current value, collapses themes that
+   * become empty, and rewrites the stats-bar counts. Slider value
+   * persists in {@code localStorage} so revisits remember the
+   * preference.
+   */
+  private static final String AGE_FILTER_SCRIPT = """
+      <script>
+      (function() {
+        var KEY = 'maxAgeHours';
+        var slider = document.getElementById('hoursFilter');
+        var valueEl = document.getElementById('hoursValue');
+        if (!slider || !valueEl) return;
+
+        var stored = parseInt(localStorage.getItem(KEY), 10);
+        if (!isNaN(stored) && stored >= 1 && stored <= 168) {
+          slider.value = String(stored);
+        }
+
+        function formatHours(h) {
+          if (h >= 168) return 'Last week';
+          if (h >= 24) {
+            var days = Math.round((h / 24) * 10) / 10;
+            return days + (days === 1 ? ' day' : ' days');
+          }
+          return h + (h === 1 ? ' hour' : ' hours');
+        }
+
+        function apply() {
+          var hours = parseInt(slider.value, 10);
+          if (isNaN(hours)) hours = 72;
+          valueEl.textContent = formatHours(hours);
+          localStorage.setItem(KEY, String(hours));
+
+          var cutoff = Date.now() - hours * 3600 * 1000;
+          var cards = document.querySelectorAll('.article-card[data-pubdate]');
+          var hidden = 0;
+          cards.forEach(function(card) {
+            var iso = card.getAttribute('data-pubdate');
+            if (!iso) return;
+            var pub = new Date(iso).getTime();
+            if (isNaN(pub)) return;
+            if (pub < cutoff) {
+              card.classList.add('hidden-by-age');
+              hidden++;
+            } else {
+              card.classList.remove('hidden-by-age');
+            }
+          });
+
+          var visibleThemes = 0;
+          document.querySelectorAll('.theme-group').forEach(function(group) {
+            var visible = group.querySelectorAll('.article-card:not(.hidden-by-age)').length;
+            if (visible === 0) {
+              group.classList.add('hidden-by-age');
+              return;
+            }
+            group.classList.remove('hidden-by-age');
+            visibleThemes++;
+            var countEl = group.querySelector('.theme-count');
+            if (countEl) countEl.textContent = visible + ' article' + (visible === 1 ? '' : 's');
+          });
+
+          var nums = document.querySelectorAll('.stats-bar .stat-num');
+          if (nums.length >= 2) {
+            nums[0].textContent = cards.length - hidden;
+            nums[1].textContent = visibleThemes;
+          }
+        }
+
+        slider.addEventListener('input', apply);
+        apply();
+      })();
+      </script>
+      """;
+
   // --- Public API ----------------------------------------------------------
 
   public String subject(List<Article> articles, FeedService.FetchResult fetch) {
@@ -193,6 +271,15 @@ public class BriefingRenderer {
       sb.append("</div>\n");
     }
 
+    // Age slider — client-side filter by max hours-old. Default value is
+    // rehydrated from localStorage in the script below; the markup just
+    // ships a sensible 72h initial so the page is usable before JS runs.
+    sb.append("<div class=\"filter-bar\">\n")
+        .append("  <label for=\"hoursFilter\">Max age</label>\n")
+        .append("  <input type=\"range\" id=\"hoursFilter\" min=\"1\" max=\"168\" value=\"72\" step=\"1\">\n")
+        .append("  <span class=\"filter-value\" id=\"hoursValue\">3 days</span>\n")
+        .append("</div>\n");
+
     // Theme groups (collapsed by default)
     for (int gi = 0; gi < groups.size(); gi++) {
       ThemeView t = groups.get(gi);
@@ -212,7 +299,11 @@ public class BriefingRenderer {
 
       sb.append("  <div class=\"articles-grid\">\n");
       for (Article a : t.articles()) {
+        String pubIso = a.pubDate() == null || a.pubDate().equals(Instant.EPOCH)
+            ? ""
+            : a.pubDate().toString();
         sb.append("    <a class=\"article-card\" href=\"").append(escapeAttr(a.link()))
+            .append("\" data-pubdate=\"").append(escapeAttr(pubIso))
             .append("\" target=\"_blank\" rel=\"noopener\">\n")
             .append("      <div class=\"article-body\">\n");
         if (a.category() != null && !a.category().isBlank()) {
@@ -236,6 +327,7 @@ public class BriefingRenderer {
 
     sb.append("</main>\n");
     sb.append("<footer class=\"footer\">SMH RSS Reader &nbsp;·&nbsp; Full feed, sport filtered &nbsp;·&nbsp; Data from smh.com.au</footer>\n");
+    sb.append(AGE_FILTER_SCRIPT);
     sb.append("</body>\n</html>\n");
     return sb.toString();
   }

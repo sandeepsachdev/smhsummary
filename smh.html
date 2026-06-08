@@ -266,6 +266,43 @@
     white-space: nowrap;
   }
 
+  /* Age-filter slider — client-side, hides articles older than N hours. */
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    margin: 0 0 16px;
+    background: var(--paper-warm);
+    border-left: 3px solid var(--accent);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-soft);
+    flex-wrap: wrap;
+  }
+  .filter-bar label {
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+  .filter-bar input[type="range"] {
+    flex: 1 1 200px;
+    max-width: 320px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .filter-bar .filter-value {
+    color: var(--ink);
+    letter-spacing: 0.02em;
+    min-width: 90px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .article-card.hidden-by-age,
+  .theme-group.hidden-by-age { display: none; }
+
   /* THEME GROUP */
   .theme-group {
     margin-bottom: 12px;
@@ -870,6 +907,7 @@ function renderArticles(articles, preGrouped, usageBarHtml) {
   // Stats
   const totalThemes = sorted.length;
 
+  const initialHours = clampHours(parseInt(localStorage.getItem('maxAgeHours') || '72', 10));
   let html = `
     <div class="stats-bar">
       <div class="stat"><span class="stat-num">${articles.length}</span><span class="stat-label">Articles</span></div>
@@ -877,6 +915,11 @@ function renderArticles(articles, preGrouped, usageBarHtml) {
       <div class="stat"><span class="stat-num">${totalThemes}</span><span class="stat-label">Themes</span></div>
     </div>
     ${usageBarHtml || ''}
+    <div class="filter-bar">
+      <label for="hoursFilter">Max age</label>
+      <input type="range" id="hoursFilter" min="1" max="168" value="${initialHours}" step="1">
+      <span class="filter-value" id="hoursValue">${formatHours(initialHours)}</span>
+    </div>
   `;
 
   sorted.forEach(({ theme, articles }, gi) => {
@@ -899,8 +942,9 @@ function renderArticles(articles, preGrouped, usageBarHtml) {
       const summaryText = a.aiSummary
         ? a.aiSummary
         : (a.description ? a.description + (a.description.length >= 220 ? '…' : '') : '');
+      const pubIso = a.pubDateObj && !isNaN(a.pubDateObj.getTime()) ? a.pubDateObj.toISOString() : '';
       html += `
-        <a class="article-card" href="${a.link}" target="_blank" rel="noopener">
+        <a class="article-card" href="${a.link}" target="_blank" rel="noopener" data-pubdate="${pubIso}">
           <div class="article-body">
             ${catLabel ? `<div class="article-category">${catLabel}</div>` : ''}
             <div class="article-title">${a.title}</div>
@@ -918,6 +962,76 @@ function renderArticles(articles, preGrouped, usageBarHtml) {
   });
 
   content.innerHTML = html;
+  setupAgeFilter();
+}
+
+// ─── Age slider (client-side filter by hours-old) ────────────────────────────
+
+function clampHours(h) {
+  if (!Number.isFinite(h)) return 72;
+  return Math.min(168, Math.max(1, Math.round(h)));
+}
+
+function formatHours(h) {
+  if (h >= 168) return 'Last week';
+  if (h >= 24) {
+    const days = h / 24;
+    const rounded = Math.round(days * 10) / 10;
+    return rounded + (rounded === 1 ? ' day' : ' days');
+  }
+  return h + (h === 1 ? ' hour' : ' hours');
+}
+
+function setupAgeFilter() {
+  const slider = document.getElementById('hoursFilter');
+  const valueEl = document.getElementById('hoursValue');
+  if (!slider || !valueEl) return;
+
+  function apply() {
+    const hours = clampHours(parseInt(slider.value, 10));
+    valueEl.textContent = formatHours(hours);
+    localStorage.setItem('maxAgeHours', String(hours));
+
+    const cutoff = Date.now() - hours * 3600 * 1000;
+    const cards = document.querySelectorAll('.article-card[data-pubdate]');
+    let hidden = 0;
+    cards.forEach(card => {
+      const iso = card.getAttribute('data-pubdate');
+      if (!iso) return;
+      const pub = new Date(iso).getTime();
+      if (isNaN(pub)) return;
+      if (pub < cutoff) {
+        card.classList.add('hidden-by-age');
+        hidden++;
+      } else {
+        card.classList.remove('hidden-by-age');
+      }
+    });
+
+    // Collapse themes with no visible articles; update count badges.
+    let visibleThemes = 0;
+    document.querySelectorAll('.theme-group').forEach(group => {
+      const visible = group.querySelectorAll('.article-card:not(.hidden-by-age)').length;
+      if (visible === 0) {
+        group.classList.add('hidden-by-age');
+        return;
+      }
+      group.classList.remove('hidden-by-age');
+      visibleThemes++;
+      const countEl = group.querySelector('.theme-count');
+      if (countEl) countEl.textContent = visible + ' article' + (visible === 1 ? '' : 's');
+    });
+
+    // Rewrite the top-line stats to reflect the filter.
+    const nums = document.querySelectorAll('.stats-bar .stat-num');
+    if (nums.length >= 2) {
+      nums[0].textContent = cards.length - hidden;
+      nums[1].textContent = visibleThemes;
+    }
+  }
+
+  slider.addEventListener('input', apply);
+  apply();
 }
 
 // ─── Last-run persistence ────────────────────────────────────────────────────
