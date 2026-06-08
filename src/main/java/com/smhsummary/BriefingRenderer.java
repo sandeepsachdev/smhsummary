@@ -310,6 +310,7 @@ public class BriefingRenderer {
         }
       }
       if (bucket.isEmpty()) continue;
+      sortByDateDesc(bucket);
       out.add(new ThemeView(
           t.name() == null ? "Untitled" : t.name(),
           t.emoji() == null || t.emoji().isBlank() ? "📰" : t.emoji(),
@@ -322,9 +323,17 @@ public class BriefingRenderer {
       if (!claimed.contains(i)) orphans.add(articles.get(i));
     }
     if (!orphans.isEmpty()) {
+      sortByDateDesc(orphans);
       out.add(new ThemeView("Other", "📄", null, orphans));
     }
     return out;
+  }
+
+  /** Newest article first within a theme. Articles with no pubDate sink to the bottom. */
+  private static void sortByDateDesc(List<Article> bucket) {
+    bucket.sort(Comparator.comparing(
+        Article::pubDate,
+        Comparator.nullsLast(Comparator.reverseOrder())));
   }
 
   // --- Fallback keyword classifier (mirrors smh.html THEMES) -------------
@@ -374,6 +383,7 @@ public class BriefingRenderer {
       buckets.computeIfAbsent(t.name(), k -> new ArrayList<>()).add(a);
       meta.putIfAbsent(t.name(), t);
     }
+    buckets.values().forEach(BriefingRenderer::sortByDateDesc);
     return buckets.entrySet().stream()
         .sorted(Comparator.<Map.Entry<String, List<Article>>>comparingInt(e -> e.getValue().size()).reversed())
         .map(e -> new ThemeView(e.getKey(), meta.get(e.getKey()).emoji(), null, e.getValue()))

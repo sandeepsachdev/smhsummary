@@ -760,17 +760,19 @@ function renderArticles(articles, preGrouped) {
 
   let sorted;
   if (preGrouped) {
-    // Use Claude-supplied themes (already ordered by significance)
+    // Use Claude-supplied themes (already date-sorted in loadFeed)
     sorted = preGrouped;
   } else {
-    // Fallback: group by keyword classifier, sort by article count desc
+    // Fallback: group by keyword classifier
     const grouped = {};
     articles.forEach(a => {
       const theme = classifyArticle(a);
       if (!grouped[theme.key]) grouped[theme.key] = { theme, articles: [] };
       grouped[theme.key].articles.push(a);
     });
-    sorted = Object.values(grouped).sort((a,b) => b.articles.length - a.articles.length);
+    // Newest article first within each theme; themes ranked by article count.
+    Object.values(grouped).forEach(g => g.articles.sort((a, b) => b.pubDateObj - a.pubDateObj));
+    sorted = Object.values(grouped).sort((a, b) => b.articles.length - a.articles.length);
   }
 
   // Stats
@@ -929,7 +931,8 @@ async function loadFeed() {
               return true;
             })
             .map(i => kept[i])
-            .filter(Boolean),
+            .filter(Boolean)
+            .sort((a, b) => b.pubDateObj - a.pubDateObj),
         }));
         cutoffInfo.innerHTML += ` · AI-grouped`;
       } catch (e) {
