@@ -22,6 +22,15 @@
         <java.version>21</java.version>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
+        <!--
+            Pin Jackson to 2.17.x.
+            Spring Boot 3.4.0 ships Jackson 2.18.1, but anthropic-java has a
+            runtime check that refuses to start on 2.18.x because of a
+            jackson-databind regression:
+              https://github.com/FasterXML/jackson-databind/issues/4639
+            Overriding the BOM cascades to every Jackson module Spring pulls in.
+        -->
+        <jackson-bom.version>2.17.2</jackson-bom.version>
     </properties>
 
     <dependencies>
