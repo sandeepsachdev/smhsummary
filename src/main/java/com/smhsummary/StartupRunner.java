@@ -30,7 +30,11 @@ public class StartupRunner implements ApplicationRunner {
     log.info("=== Startup briefing build ===");
     try {
       BriefingService.Briefing b = briefingService.build();
-      emailService.send(b.subject(), b.emailHtml());
+      if (b.emailArticleCount() == 0) {
+        log.info("Skipping email — no articles fit the configured time window");
+      } else {
+        emailService.send(b.subject(), b.emailHtml());
+      }
       log.info("=== Startup briefing complete ===");
     } catch (Exception e) {
       log.error("Startup briefing failed — the web endpoints will return a 500 until /refresh succeeds: {}",

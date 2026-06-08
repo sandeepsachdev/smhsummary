@@ -60,25 +60,29 @@ body {
 }
 .theme-head {
   border-bottom: 1.5px solid #c8bfaf;
-  padding-bottom: 6px;
-  margin-bottom: 10px;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
 }
-.theme-head .emoji { font-size: 18px; margin-right: 8px; vertical-align: middle; }
+.theme-head .emoji { font-size: 22px; margin-right: 10px; vertical-align: middle; }
 .theme-head .name {
+  /* Pure black + pure white so Gmail's dark-mode auto-inverter leaves
+     the sticker recognisable — mid-tones get aggressively re-paletted. */
   font-family: 'Courier New', monospace;
-  font-size: 11px;
+  font-size: 13px;
+  font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  background: #1a1108;
-  color: #f5f0e8;
-  padding: 3px 8px;
+  background: #000000;
+  color: #ffffff;
+  padding: 6px 12px;
   vertical-align: middle;
+  display: inline-block;
 }
 .theme-head .count {
   font-family: 'Courier New', monospace;
-  font-size: 10px;
+  font-size: 11px;
   color: #8a7a66;
-  margin-left: 10px;
+  margin-left: 12px;
   vertical-align: middle;
 }
 .reasoning {

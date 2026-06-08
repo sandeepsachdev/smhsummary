@@ -2,9 +2,11 @@ package com.smhsummary;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -25,12 +27,18 @@ public class BriefingService {
   private final FeedService feedService;
   private final ClaudeService claudeService;
   private final BriefingRenderer renderer;
+  private final int emailMaxAgeHours;
   private final AtomicReference<Briefing> cache = new AtomicReference<>();
 
-  public BriefingService(FeedService feedService, ClaudeService claudeService, BriefingRenderer renderer) {
+  public BriefingService(
+      FeedService feedService,
+      ClaudeService claudeService,
+      BriefingRenderer renderer,
+      @Value("${email.max-age-hours:12}") int emailMaxAgeHours) {
     this.feedService = feedService;
     this.claudeService = claudeService;
     this.renderer = renderer;
+    this.emailMaxAgeHours = Math.max(1, emailMaxAgeHours);
   }
 
   /**
@@ -44,6 +52,7 @@ public class BriefingService {
       FeedService.FetchResult fetch,
       String emailHtml,
       String subject,
+      int emailArticleCount,
       Instant generatedAt
   ) {
     public int articleCount() { return articles == null ? 0 : articles.size(); }
@@ -73,13 +82,29 @@ public class BriefingService {
       }
     }
 
-    String subject = renderer.subject(articles, fetch);
-    String emailHtml = renderer.renderEmail(articles, claude, fetch);
+    // Email gets the same time-window slice the web slider defaults to:
+    // articles published in the last EMAIL_MAX_AGE_HOURS. Themes are
+    // remapped onto the trimmed set; themes that lose every article are
+    // dropped. If nothing fits the window, the emailArticleCount is 0
+    // and StartupRunner skips sending altogether.
+    Instant emailSince = Instant.now().minus(emailMaxAgeHours, ChronoUnit.HOURS);
+    List<Article> emailArticles = new ArrayList<>();
+    for (Article a : articles) {
+      if (a.pubDate() != null && a.pubDate().isAfter(emailSince)) {
+        emailArticles.add(a);
+      }
+    }
+    ClaudeService.BriefingResponse emailClaude = remapClaudeForFilter(claude, articles, emailArticles);
 
-    Briefing b = new Briefing(articles, claude, fetch, emailHtml, subject, Instant.now());
+    String subject = renderer.subject(emailArticles, fetch, emailMaxAgeHours);
+    String emailHtml = renderer.renderEmail(emailArticles, emailClaude, fetch, emailMaxAgeHours);
+
+    Briefing b = new Briefing(articles, claude, fetch, emailHtml, subject,
+        emailArticles.size(), Instant.now());
     cache.set(b);
-    log.info("Briefing built — {} articles · {} themes · claude={} · subject=\"{}\"",
-        b.articleCount(), b.themeCount(), b.usedClaude(), b.subject());
+    log.info("Briefing built — {} web articles · {} themes · claude={} · email window last {}h ({} articles) · subject=\"{}\"",
+        b.articleCount(), b.themeCount(), b.usedClaude(),
+        emailMaxAgeHours, b.emailArticleCount(), b.subject());
     return b;
   }
 

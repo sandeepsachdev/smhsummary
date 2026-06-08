@@ -62,6 +62,7 @@ All settings are environment variables:
 | `RESEND_API_KEY`    | no       | _(none)_                               | If unset, the startup email is skipped |
 | `EMAIL_FROM`        | no       | `Briefing <onboarding@resend.dev>`     | Resend's shared sandbox sender works for testing |
 | `EMAIL_TO`          | no       | _(none)_                               | Comma-separated list of recipients     |
+| `EMAIL_MAX_AGE_HOURS` | no     | `12`                                   | Trims the startup email to articles from the last N hours — matches the web slider's default. Set to `24` for a full daily digest. |
 
 The app starts up cleanly even with zero env vars — it'll show keyword-grouped
 themes and skip the email step.

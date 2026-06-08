@@ -166,14 +166,15 @@ public class BriefingRenderer {
 
   // --- Public API ----------------------------------------------------------
 
-  public String subject(List<Article> articles, FeedService.FetchResult fetch) {
-    // Subject reads as a one-liner with date, time, and headline stats so
-    // the inbox preview is self-describing.
+  public String subject(List<Article> articles, FeedService.FetchResult fetch, int maxAgeHours) {
+    // Subject reads as a one-liner with date, time, time-window, and
+    // article count so the inbox preview is self-describing.
     String dateTime = DateTimeFormatter
         .ofPattern("EEE d MMM, h:mm a", Locale.ENGLISH)
         .withZone(SYDNEY)
         .format(Instant.now());
-    return "SMH Briefing · " + dateTime + " · " + articles.size() + " articles";
+    return "SMH Briefing · " + dateTime + " · last " + maxAgeHours + "h · "
+        + articles.size() + " article" + (articles.size() == 1 ? "" : "s");
   }
 
   public String renderPage(List<Article> articles, ClaudeService.BriefingResponse claude,
@@ -329,7 +330,7 @@ public class BriefingRenderer {
   }
 
   public String renderEmail(List<Article> articles, ClaudeService.BriefingResponse claude,
-                            FeedService.FetchResult fetch) {
+                            FeedService.FetchResult fetch, int maxAgeHours) {
     List<ThemeView> groups = groupArticles(articles, claude);
     Instant now = Instant.now();
 
@@ -337,6 +338,11 @@ public class BriefingRenderer {
     sb.append("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
         .append("<meta charset=\"UTF-8\">\n")
         .append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
+        // Tell email clients (Gmail, Apple Mail, Outlook) we support both
+        // colour schemes so they don't aggressively auto-invert dark
+        // chrome like the category stickers.
+        .append("<meta name=\"color-scheme\" content=\"light dark\">\n")
+        .append("<meta name=\"supported-color-schemes\" content=\"light dark\">\n")
         .append("<title>SMH Briefing — ").append(escape(ISO_DATE.format(now))).append("</title>\n")
         .append("<style>\n").append(emailCss).append("\n</style>\n")
         .append("</head>\n<body>\n");
@@ -351,7 +357,7 @@ public class BriefingRenderer {
     sb.append("<div class=\"masthead\">\n")
         .append("  <h1>SMH Briefing</h1>\n")
         .append("  <p class=\"date\">").append(escape(generatedAt))
-        .append(" AEST · Sydney</p>\n")
+        .append(" AEST · Sydney · last ").append(maxAgeHours).append(" hours</p>\n")
         .append("  <p class=\"stats\">")
         .append("<strong>").append(articles.size()).append("</strong> articles")
         .append("<span class=\"divider\">·</span>")

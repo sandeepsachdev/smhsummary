@@ -14,6 +14,11 @@ resend:
   from: ${EMAIL_FROM:Briefing <onboarding@resend.dev>}
   to: ${EMAIL_TO:}
 
+email:
+  # Trim the email to articles published in the last N hours.
+  # Matches the web page's max-age slider default; override per deploy.
+  max-age-hours: ${EMAIL_MAX_AGE_HOURS:12}
+
 logging:
   level:
     root: INFO
