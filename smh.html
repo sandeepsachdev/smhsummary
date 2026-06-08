@@ -907,7 +907,7 @@ function renderArticles(articles, preGrouped, usageBarHtml) {
   // Stats
   const totalThemes = sorted.length;
 
-  const initialHours = clampHours(parseInt(localStorage.getItem('maxAgeHours') || '72', 10));
+  const initialHours = clampHours(parseInt(localStorage.getItem('maxAgeHours') || '12', 10));
   let html = `
     <div class="stats-bar">
       <div class="stat"><span class="stat-num">${articles.length}</span><span class="stat-label">Articles</span></div>
@@ -917,7 +917,7 @@ function renderArticles(articles, preGrouped, usageBarHtml) {
     ${usageBarHtml || ''}
     <div class="filter-bar">
       <label for="hoursFilter">Max age</label>
-      <input type="range" id="hoursFilter" min="1" max="168" value="${initialHours}" step="1">
+      <input type="range" id="hoursFilter" min="1" max="24" value="${initialHours}" step="1">
       <span class="filter-value" id="hoursValue">${formatHours(initialHours)}</span>
     </div>
   `;
@@ -968,17 +968,12 @@ function renderArticles(articles, preGrouped, usageBarHtml) {
 // ─── Age slider (client-side filter by hours-old) ────────────────────────────
 
 function clampHours(h) {
-  if (!Number.isFinite(h)) return 72;
-  return Math.min(168, Math.max(1, Math.round(h)));
+  if (!Number.isFinite(h)) return 12;
+  return Math.min(24, Math.max(1, Math.round(h)));
 }
 
 function formatHours(h) {
-  if (h >= 168) return 'Last week';
-  if (h >= 24) {
-    const days = h / 24;
-    const rounded = Math.round(days * 10) / 10;
-    return rounded + (rounded === 1 ? ' day' : ' days');
-  }
+  if (h >= 24) return 'Last 24 hours';
   return h + (h === 1 ? ' hour' : ' hours');
 }
 

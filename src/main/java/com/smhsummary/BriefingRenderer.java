@@ -107,22 +107,18 @@ public class BriefingRenderer {
         if (!slider || !valueEl) return;
 
         var stored = parseInt(localStorage.getItem(KEY), 10);
-        if (!isNaN(stored) && stored >= 1 && stored <= 168) {
+        if (!isNaN(stored) && stored >= 1 && stored <= 24) {
           slider.value = String(stored);
         }
 
         function formatHours(h) {
-          if (h >= 168) return 'Last week';
-          if (h >= 24) {
-            var days = Math.round((h / 24) * 10) / 10;
-            return days + (days === 1 ? ' day' : ' days');
-          }
+          if (h >= 24) return 'Last 24 hours';
           return h + (h === 1 ? ' hour' : ' hours');
         }
 
         function apply() {
           var hours = parseInt(slider.value, 10);
-          if (isNaN(hours)) hours = 72;
+          if (isNaN(hours)) hours = 12;
           valueEl.textContent = formatHours(hours);
           localStorage.setItem(KEY, String(hours));
 
@@ -273,11 +269,11 @@ public class BriefingRenderer {
 
     // Age slider — client-side filter by max hours-old. Default value is
     // rehydrated from localStorage in the script below; the markup just
-    // ships a sensible 72h initial so the page is usable before JS runs.
+    // ships a sensible 12h initial so the page is usable before JS runs.
     sb.append("<div class=\"filter-bar\">\n")
         .append("  <label for=\"hoursFilter\">Max age</label>\n")
-        .append("  <input type=\"range\" id=\"hoursFilter\" min=\"1\" max=\"168\" value=\"72\" step=\"1\">\n")
-        .append("  <span class=\"filter-value\" id=\"hoursValue\">3 days</span>\n")
+        .append("  <input type=\"range\" id=\"hoursFilter\" min=\"1\" max=\"24\" value=\"12\" step=\"1\">\n")
+        .append("  <span class=\"filter-value\" id=\"hoursValue\">12 hours</span>\n")
         .append("</div>\n");
 
     // Theme groups (collapsed by default)

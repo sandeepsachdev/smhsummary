@@ -107,8 +107,8 @@ expects a different port and override `server.port` accordingly.
 - **Sections collapsed by default**, click to expand. (Web only — the email
   always shows everything expanded.)
 - **Max-age slider:** a range slider near the top of the page filters
-  visible articles by hours old (1 hour to 1 week, default 3 days). Hides
-  cards client-side, collapses themes that become empty, and rewrites the
+  visible articles by hours old (1 to 24 hours, default 12). Hides cards
+  client-side, collapses themes that become empty, and rewrites the
   stats-bar counts. Slider value persists in `localStorage`.
 - **Since-last-run filter:** every successful load saves the current time to
   `localStorage` under `lastRunTime`. The next load shows only articles
