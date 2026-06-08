@@ -93,8 +93,13 @@ public class BriefingRenderer {
   // --- Public API ----------------------------------------------------------
 
   public String subject(List<Article> articles, FeedService.FetchResult fetch) {
-    return "SMH Briefing — " + DATE_LABEL.format(Instant.now())
-        + " (" + articles.size() + " articles)";
+    // Subject reads as a one-liner with date, time, and headline stats so
+    // the inbox preview is self-describing.
+    String dateTime = DateTimeFormatter
+        .ofPattern("EEE d MMM, h:mm a", Locale.ENGLISH)
+        .withZone(SYDNEY)
+        .format(Instant.now());
+    return "SMH Briefing · " + dateTime + " · " + articles.size() + " articles";
   }
 
   public String renderPage(List<Article> articles, ClaudeService.BriefingResponse claude,
@@ -248,14 +253,18 @@ public class BriefingRenderer {
         .append("<style>\n").append(emailCss).append("\n</style>\n")
         .append("</head>\n<body>\n");
 
+    // Title block: headline, full date + generation time, headline stats.
+    String generatedAt = DateTimeFormatter
+        .ofPattern("EEEE, d MMMM yyyy · h:mm a", Locale.ENGLISH)
+        .withZone(SYDNEY)
+        .format(now);
+
     sb.append("<div class=\"email-wrap\">\n");
     sb.append("<div class=\"masthead\">\n")
         .append("  <h1>SMH Briefing</h1>\n")
-        .append("  <p class=\"date\">").append(escape(DATE_LABEL.format(now)))
-        .append(" · Sydney, Australia</p>\n")
-        .append("</div>\n");
-
-    sb.append("<p class=\"stats\">")
+        .append("  <p class=\"date\">").append(escape(generatedAt))
+        .append(" AEST · Sydney</p>\n")
+        .append("  <p class=\"stats\">")
         .append("<strong>").append(articles.size()).append("</strong> articles")
         .append("<span class=\"divider\">·</span>")
         .append("<strong>").append(groups.size()).append("</strong> themes")
@@ -263,7 +272,8 @@ public class BriefingRenderer {
         .append(fetch.feedsSucceeded()).append('/').append(fetch.feedsTotal()).append(" feeds")
         .append("<span class=\"divider\">·</span>")
         .append(fetch.sportFiltered()).append(" sport filtered")
-        .append("</p>\n");
+        .append("</p>\n")
+        .append("</div>\n");
 
     for (ThemeView t : groups) {
       sb.append("<div class=\"theme\">\n");
