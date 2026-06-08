@@ -50,6 +50,88 @@ public class BriefingRenderer {
     this.emailCss = loadResource("/templates/email.css");
   }
 
+  // Client-side filter: on page load, read the previous lastRunTime from
+  // localStorage; hide article-cards whose data-pubdate is older; collapse
+  // theme groups that become empty; update the stats bar; show a banner
+  // with a "show all" link that clears localStorage. On first visit there
+  // is nothing to compare against so everything stays visible and we just
+  // record the current time.
+  private static final String SINCE_FILTER_SCRIPT = """
+      <script>
+      (function() {
+        var KEY = 'lastRunTime';
+        var iso = localStorage.getItem(KEY);
+        var previous = iso ? new Date(iso) : null;
+        var hasPrevious = previous && !isNaN(previous.getTime());
+
+        window.__clearSince = function(e) {
+          if (e) e.preventDefault();
+          localStorage.removeItem(KEY);
+          location.reload();
+        };
+
+        if (!hasPrevious) {
+          localStorage.setItem(KEY, new Date().toISOString());
+          return;
+        }
+
+        var cards = document.querySelectorAll('.article-card[data-pubdate]');
+        var hidden = 0;
+        cards.forEach(function(card) {
+          var iso = card.getAttribute('data-pubdate');
+          if (!iso) return;
+          var pub = new Date(iso);
+          if (!isNaN(pub.getTime()) && pub < previous) {
+            card.classList.add('hidden-old');
+            hidden++;
+          }
+        });
+
+        var visibleThemes = 0;
+        document.querySelectorAll('.theme-group').forEach(function(group) {
+          var visible = group.querySelectorAll('.article-card:not(.hidden-old)').length;
+          if (visible === 0) {
+            group.classList.add('hidden-old');
+            return;
+          }
+          visibleThemes++;
+          var countEl = group.querySelector('.theme-count');
+          if (countEl) countEl.textContent = visible + ' article' + (visible === 1 ? '' : 's');
+        });
+
+        var visibleArticles = cards.length - hidden;
+        var nums = document.querySelectorAll('.stats-bar .stat-num');
+        if (nums.length >= 2) {
+          nums[0].textContent = visibleArticles;
+          nums[1].textContent = visibleThemes;
+        }
+
+        var label = previous.toLocaleString('en-AU', {
+          timeZone: 'Australia/Sydney',
+          day: 'numeric', month: 'short',
+          hour: '2-digit', minute: '2-digit', hour12: true
+        });
+
+        var banner = document.createElement('div');
+        banner.className = 'since-banner';
+        if (visibleArticles === 0) {
+          banner.innerHTML = '<strong>Caught up.</strong> No new articles since ' + label
+            + '. <a href="#" onclick="__clearSince(event)">show all ' + cards.length + '</a>';
+        } else {
+          banner.innerHTML = '<strong>' + visibleArticles + ' new article'
+            + (visibleArticles === 1 ? '' : 's') + '</strong> since ' + label
+            + ' &middot; ' + hidden + ' older hidden &middot; '
+            + '<a href="#" onclick="__clearSince(event)">show all</a>';
+        }
+        var main = document.querySelector('.main');
+        var stats = document.querySelector('.stats-bar');
+        if (main && stats) main.insertBefore(banner, stats);
+
+        localStorage.setItem(KEY, new Date().toISOString());
+      })();
+      </script>
+      """;
+
   // --- Public API ----------------------------------------------------------
 
   public String subject(List<Article> articles, FeedService.FetchResult fetch) {
@@ -128,7 +210,11 @@ public class BriefingRenderer {
 
       sb.append("  <div class=\"articles-grid\">\n");
       for (Article a : t.articles()) {
+        String pubIso = a.pubDate() == null || a.pubDate().equals(Instant.EPOCH)
+            ? ""
+            : a.pubDate().toString();
         sb.append("    <a class=\"article-card\" href=\"").append(escapeAttr(a.link()))
+            .append("\" data-pubdate=\"").append(escapeAttr(pubIso))
             .append("\" target=\"_blank\" rel=\"noopener\">\n")
             .append("      <div class=\"article-body\">\n");
         if (a.category() != null && !a.category().isBlank()) {
@@ -152,6 +238,7 @@ public class BriefingRenderer {
 
     sb.append("</main>\n");
     sb.append("<footer class=\"footer\">SMH RSS Reader &nbsp;·&nbsp; Full feed, sport filtered &nbsp;·&nbsp; Data from smh.com.au</footer>\n");
+    sb.append(SINCE_FILTER_SCRIPT);
     sb.append("</body>\n</html>\n");
     return sb.toString();
   }

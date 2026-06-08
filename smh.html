@@ -825,6 +825,33 @@ function renderArticles(articles, preGrouped) {
   content.innerHTML = html;
 }
 
+// ─── Last-run persistence ────────────────────────────────────────────────────
+// Remember when this browser last successfully loaded the briefing, then
+// filter subsequent loads to only show articles published since then.
+
+const LAST_RUN_KEY = 'lastRunTime';
+
+function getPreviousRun() {
+  const iso = localStorage.getItem(LAST_RUN_KEY);
+  if (!iso) return null;
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function clearSinceAndReload(e) {
+  if (e) e.preventDefault();
+  localStorage.removeItem(LAST_RUN_KEY);
+  loadFeed();
+}
+
+function formatSinceLabel(d) {
+  return d.toLocaleString('en-AU', {
+    timeZone: 'Australia/Sydney',
+    day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  });
+}
+
 // ─── Main load ────────────────────────────────────────────────────────────────
 
 async function loadFeed() {
@@ -844,12 +871,40 @@ async function loadFeed() {
     if (articles.length === 0) {
       throw new Error(`All ${RSS_FEEDS.length} feeds failed to load`);
     }
-    const kept = articles.filter(a => !isSportArticle(a));
-    const sportCount = articles.length - kept.length;
+    const nonSport = articles.filter(a => !isSportArticle(a));
+    const sportCount = articles.length - nonSport.length;
 
-    cutoffInfo.textContent =
+    // Apply the since-last-run filter on top of the sport filter.
+    const previousRun = getPreviousRun();
+    const kept = previousRun
+      ? nonSport.filter(a => a.pubDateObj >= previousRun)
+      : nonSport;
+    const hiddenOld = nonSport.length - kept.length;
+
+    // Status text — built as HTML so we can include a "show all" link.
+    const baseStatus =
       `${succeeded}/${RSS_FEEDS.length} feeds · ${totalBeforeDedupe} raw · ${articles.length} unique · ${sportCount} sport filtered` +
       (failed > 0 ? ` · ${failed} feed(s) failed` : '');
+    if (previousRun) {
+      cutoffInfo.innerHTML = `${baseStatus} · since ${formatSinceLabel(previousRun)} (${hiddenOld} older hidden) — <a href="#" onclick="clearSinceAndReload(event)">show all</a>`;
+    } else {
+      cutoffInfo.innerHTML = `${baseStatus} · first run`;
+    }
+
+    // Caught-up case: nothing new since the previous run. Skip Claude
+    // (no point spending tokens) and show a friendly message. Still
+    // bump lastRunTime so subsequent loads measure from now.
+    if (kept.length === 0 && previousRun) {
+      statusEl.innerHTML = `
+        <span class="status-icon">✨</span>
+        <h2>Caught up</h2>
+        <p>No new articles since ${formatSinceLabel(previousRun)}. The feed has ${nonSport.length} earlier non-sport articles — <a href="#" onclick="clearSinceAndReload(event)">show all</a>.</p>
+      `;
+      loadBtn.style.display = 'none';
+      refreshBtn.style.display = 'inline-block';
+      localStorage.setItem(LAST_RUN_KEY, new Date().toISOString());
+      return;
+    }
 
     // If a Claude key is available, ask Claude to summarise + group.
     // On any failure, fall back silently to the keyword classifier.
@@ -876,13 +931,13 @@ async function loadFeed() {
             .map(i => kept[i])
             .filter(Boolean),
         }));
-        cutoffInfo.textContent += ` · AI-grouped`;
+        cutoffInfo.innerHTML += ` · AI-grouped`;
       } catch (e) {
         console.warn('Claude enrichment failed:', e);
-        cutoffInfo.textContent += ` · AI failed (${e.message.slice(0, 60)})`;
+        cutoffInfo.innerHTML += ` · AI failed (${e.message.slice(0, 60)})`;
       }
     } else if (!apiKey) {
-      cutoffInfo.textContent += ` · no key — using keyword grouping`;
+      cutoffInfo.innerHTML += ` · no key — using keyword grouping`;
     }
 
     statusEl.style.display = 'none';
@@ -891,6 +946,10 @@ async function loadFeed() {
     refreshBtn.style.display = 'inline-block';
 
     renderArticles(kept, claudeThemes);
+
+    // Successful render — remember this moment so the next load shows
+    // only articles published after it.
+    localStorage.setItem(LAST_RUN_KEY, new Date().toISOString());
 
   } catch (err) {
     statusEl.innerHTML = `

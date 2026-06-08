@@ -106,6 +106,11 @@ expects a different port and override `server.port` accordingly.
   reasoning note explaining what ties the articles together.
 - **Sections collapsed by default**, click to expand. (Web only — the email
   always shows everything expanded.)
+- **Since-last-run filter:** every successful load saves the current time to
+  `localStorage` under `lastRunTime`. The next load shows only articles
+  published after that timestamp, with a banner offering a *show all* link
+  that clears the key. First-ever visit shows everything. (Web only — the
+  email is one-shot on app startup.)
 
 ---
 
