@@ -111,6 +111,13 @@ expects a different port and override `server.port` accordingly.
   published after that timestamp, with a banner offering a *show all* link
   that clears the key. First-ever visit shows everything. (Web only — the
   email is one-shot on app startup.)
+  - **Browser app:** filters the article list before sending it to Claude,
+    so no tokens are wasted on stories the user already saw.
+  - **Spring Boot app:** a tiny inline `<head>` script reads `lastRunTime`
+    and `location.replace`s to `/?since=<iso>` before any paint. The server
+    parses the `since` param, filters the cached articles, remaps Claude's
+    theme indices onto the trimmed set, and renders only what's new. The
+    *show all* link clears the key and navigates to `/`.
 
 ---
 

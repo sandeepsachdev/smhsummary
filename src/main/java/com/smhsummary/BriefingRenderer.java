@@ -50,82 +50,40 @@ public class BriefingRenderer {
     this.emailCss = loadResource("/templates/email.css");
   }
 
-  // Client-side filter: on page load, read the previous lastRunTime from
-  // localStorage; hide article-cards whose data-pubdate is older; collapse
-  // theme groups that become empty; update the stats bar; show a banner
-  // with a "show all" link that clears localStorage. On first visit there
-  // is nothing to compare against so everything stays visible and we just
-  // record the current time.
-  private static final String SINCE_FILTER_SCRIPT = """
+  /**
+   * Head script that drives the since-filter handshake:
+   *
+   *   - If the URL has no {@code ?since=} param AND the browser has a
+   *     stored {@code lastRunTime}, immediately {@code location.replace}
+   *     to {@code /?since=<iso>}. The redirect happens synchronously in
+   *     {@code <head>} before any paint, so no unfiltered flash.
+   *   - Otherwise (filtered page just arrived, or first visit), save
+   *     the current time as the new {@code lastRunTime}.
+   *
+   * Also exposes {@code window.__showAll} for the banner's "show all"
+   * link: clears {@code lastRunTime} and navigates to {@code /} so the
+   * server returns the unfiltered briefing.
+   */
+  private static final String SINCE_REDIRECT_SCRIPT = """
       <script>
       (function() {
         var KEY = 'lastRunTime';
-        var iso = localStorage.getItem(KEY);
-        var previous = iso ? new Date(iso) : null;
-        var hasPrevious = previous && !isNaN(previous.getTime());
+        var url = new URL(location.href);
+        var hasSince = url.searchParams.has('since');
+        var stored = localStorage.getItem(KEY);
 
-        window.__clearSince = function(e) {
+        window.__showAll = function(e) {
           if (e) e.preventDefault();
           localStorage.removeItem(KEY);
-          location.reload();
+          location.replace(location.pathname);
+          return false;
         };
 
-        if (!hasPrevious) {
-          localStorage.setItem(KEY, new Date().toISOString());
+        if (!hasSince && stored) {
+          url.searchParams.set('since', stored);
+          location.replace(url.toString());
           return;
         }
-
-        var cards = document.querySelectorAll('.article-card[data-pubdate]');
-        var hidden = 0;
-        cards.forEach(function(card) {
-          var iso = card.getAttribute('data-pubdate');
-          if (!iso) return;
-          var pub = new Date(iso);
-          if (!isNaN(pub.getTime()) && pub < previous) {
-            card.classList.add('hidden-old');
-            hidden++;
-          }
-        });
-
-        var visibleThemes = 0;
-        document.querySelectorAll('.theme-group').forEach(function(group) {
-          var visible = group.querySelectorAll('.article-card:not(.hidden-old)').length;
-          if (visible === 0) {
-            group.classList.add('hidden-old');
-            return;
-          }
-          visibleThemes++;
-          var countEl = group.querySelector('.theme-count');
-          if (countEl) countEl.textContent = visible + ' article' + (visible === 1 ? '' : 's');
-        });
-
-        var visibleArticles = cards.length - hidden;
-        var nums = document.querySelectorAll('.stats-bar .stat-num');
-        if (nums.length >= 2) {
-          nums[0].textContent = visibleArticles;
-          nums[1].textContent = visibleThemes;
-        }
-
-        var label = previous.toLocaleString('en-AU', {
-          timeZone: 'Australia/Sydney',
-          day: 'numeric', month: 'short',
-          hour: '2-digit', minute: '2-digit', hour12: true
-        });
-
-        var banner = document.createElement('div');
-        banner.className = 'since-banner';
-        if (visibleArticles === 0) {
-          banner.innerHTML = '<strong>Caught up.</strong> No new articles since ' + label
-            + '. <a href="#" onclick="__clearSince(event)">show all ' + cards.length + '</a>';
-        } else {
-          banner.innerHTML = '<strong>' + visibleArticles + ' new article'
-            + (visibleArticles === 1 ? '' : 's') + '</strong> since ' + label
-            + ' &middot; ' + hidden + ' older hidden &middot; '
-            + '<a href="#" onclick="__clearSince(event)">show all</a>';
-        }
-        var main = document.querySelector('.main');
-        var stats = document.querySelector('.stats-bar');
-        if (main && stats) main.insertBefore(banner, stats);
 
         localStorage.setItem(KEY, new Date().toISOString());
       })();
@@ -140,7 +98,7 @@ public class BriefingRenderer {
   }
 
   public String renderPage(List<Article> articles, ClaudeService.BriefingResponse claude,
-                           FeedService.FetchResult fetch) {
+                           FeedService.FetchResult fetch, Instant since, int totalAvailable) {
     List<ThemeView> groups = groupArticles(articles, claude);
     Instant now = Instant.now();
 
@@ -150,6 +108,9 @@ public class BriefingRenderer {
         .append("<meta charset=\"UTF-8\">\n")
         .append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
         .append("<title>SMH — Today's Briefing</title>\n")
+        // Inline IIFE runs synchronously before paint so the redirect to
+        // /?since=<iso> happens without any flash of unfiltered content.
+        .append(SINCE_REDIRECT_SCRIPT)
         .append("<link href=\"https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;1,8..60,300&family=DM+Mono:wght@400;500&display=swap\" rel=\"stylesheet\">\n")
         .append("<style>\n").append(webCss).append("\n</style>\n")
         .append("</head>\n<body>\n");
@@ -191,6 +152,26 @@ public class BriefingRenderer {
         .append("<span class=\"stat-label\">Last built (AEST)</span></div>\n")
         .append("</div>\n");
 
+    // Since-banner (server-rendered when ?since= was in the URL)
+    if (since != null) {
+      int hidden = Math.max(0, totalAvailable - articles.size());
+      String label = formatSinceLabel(since);
+      sb.append("<div class=\"since-banner\">");
+      if (articles.isEmpty()) {
+        sb.append("<strong>Caught up.</strong> No new articles since ")
+            .append(escape(label))
+            .append(". <a href=\"/\" onclick=\"return __showAll(event)\">show all ")
+            .append(totalAvailable).append("</a>");
+      } else {
+        sb.append("<strong>").append(articles.size()).append(" new article")
+            .append(articles.size() == 1 ? "" : "s").append("</strong> since ")
+            .append(escape(label))
+            .append(" &middot; ").append(hidden).append(" older hidden &middot; ")
+            .append("<a href=\"/\" onclick=\"return __showAll(event)\">show all</a>");
+      }
+      sb.append("</div>\n");
+    }
+
     // Theme groups (collapsed by default)
     for (int gi = 0; gi < groups.size(); gi++) {
       ThemeView t = groups.get(gi);
@@ -210,11 +191,7 @@ public class BriefingRenderer {
 
       sb.append("  <div class=\"articles-grid\">\n");
       for (Article a : t.articles()) {
-        String pubIso = a.pubDate() == null || a.pubDate().equals(Instant.EPOCH)
-            ? ""
-            : a.pubDate().toString();
         sb.append("    <a class=\"article-card\" href=\"").append(escapeAttr(a.link()))
-            .append("\" data-pubdate=\"").append(escapeAttr(pubIso))
             .append("\" target=\"_blank\" rel=\"noopener\">\n")
             .append("      <div class=\"article-body\">\n");
         if (a.category() != null && !a.category().isBlank()) {
@@ -238,7 +215,6 @@ public class BriefingRenderer {
 
     sb.append("</main>\n");
     sb.append("<footer class=\"footer\">SMH RSS Reader &nbsp;·&nbsp; Full feed, sport filtered &nbsp;·&nbsp; Data from smh.com.au</footer>\n");
-    sb.append(SINCE_FILTER_SCRIPT);
     sb.append("</body>\n</html>\n");
     return sb.toString();
   }
@@ -426,6 +402,14 @@ public class BriefingRenderer {
   private String formatTime(Instant pubDate) {
     if (pubDate == null || pubDate.equals(Instant.EPOCH)) return "—";
     return TIME_LABEL.format(pubDate);
+  }
+
+  /** Sydney-local label used in the since-banner: e.g. "8 Jun, 07:08 am". */
+  private String formatSinceLabel(Instant since) {
+    return DateTimeFormatter
+        .ofPattern("d MMM, hh:mm a", Locale.ENGLISH)
+        .withZone(SYDNEY)
+        .format(since);
   }
 
   private static String escape(String s) {

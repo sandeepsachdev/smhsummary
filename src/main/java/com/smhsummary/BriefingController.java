@@ -2,12 +2,18 @@ package com.smhsummary;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.URI;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
 public class BriefingController {
@@ -19,16 +25,30 @@ public class BriefingController {
     this.briefingService = briefingService;
   }
 
+  /**
+   * Renders the briefing. The optional {@code since} query parameter
+   * (ISO-8601 instant, e.g. {@code 2026-06-08T01:23:45Z}) restricts the
+   * output to articles published strictly after that moment. The
+   * browser supplies this value from its {@code localStorage}
+   * {@code lastRunTime} via a head script that redirects on load.
+   */
   @GetMapping(value = "/", produces = MediaType.TEXT_HTML_VALUE)
-  public String index() {
-    return briefingService.getCachedOrBuild().webHtml();
+  public String index(@RequestParam Optional<String> since) {
+    Instant cutoff = parseSince(since.orElse(null));
+    return briefingService.renderWeb(cutoff);
   }
 
-  /** Rebuild the briefing (fresh fetch + Claude call) and return the new page. */
-  @GetMapping(value = "/refresh", produces = MediaType.TEXT_HTML_VALUE)
-  public String refresh() {
+  /**
+   * Rebuild the briefing (fresh fetch + Claude call), then 302 to {@code /}
+   * so the redirect-on-load script can re-run the since handshake exactly
+   * once. Returning HTML here would double-build because the response
+   * itself would trigger another redirect into /refresh?since=...
+   */
+  @GetMapping("/refresh")
+  public ResponseEntity<Void> refresh() {
     log.info("Manual refresh requested");
-    return briefingService.build().webHtml();
+    briefingService.build();
+    return ResponseEntity.status(HttpStatus.FOUND).location(URI.create("/")).build();
   }
 
   /** Lightweight health/status endpoint. */
@@ -46,5 +66,15 @@ public class BriefingController {
         "usedClaude", b.usedClaude(),
         "generatedAt", b.generatedAt().toString()
     ));
+  }
+
+  private Instant parseSince(String raw) {
+    if (raw == null || raw.isBlank()) return null;
+    try {
+      return Instant.parse(raw);
+    } catch (DateTimeParseException e) {
+      log.warn("Ignoring invalid ?since param: {}", raw);
+      return null;
+    }
   }
 }

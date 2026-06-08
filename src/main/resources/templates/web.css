@@ -289,7 +289,7 @@ body::before {
   border-top: 1px solid var(--rule);
 }
 
-/* Since-last-run banner injected by the client-side filter script. */
+/* Since-last-run banner — rendered server-side when ?since= is in the URL. */
 .since-banner {
   background: var(--paper-warm);
   border-left: 3px solid var(--accent);
@@ -314,10 +314,6 @@ body::before {
   text-underline-offset: 2px;
 }
 .since-banner a:hover { color: var(--accent); }
-
-/* Cards / themes hidden by the since-filter. */
-.article-card.hidden-old,
-.theme-group.hidden-old { display: none; }
 
 @media (max-width: 600px) {
   .masthead, .controls, .main { padding-left: 20px; padding-right: 20px; }
