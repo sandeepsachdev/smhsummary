@@ -36,7 +36,7 @@ public class BriefingRenderer {
   private static final DateTimeFormatter DATE_LABEL =
       DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", Locale.ENGLISH).withZone(SYDNEY);
   private static final DateTimeFormatter TIME_LABEL =
-      DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH).withZone(SYDNEY);
+      DateTimeFormatter.ofPattern("d MMM · hh:mm a", Locale.ENGLISH).withZone(SYDNEY);
   private static final DateTimeFormatter ISO_DATE =
       DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(SYDNEY);
   private static final DateTimeFormatter LAST_BUILT =
