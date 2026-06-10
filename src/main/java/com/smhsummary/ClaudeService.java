@@ -72,7 +72,8 @@ public class ClaudeService {
       double cumulativeCostUsd,
       Long rateLimitTokensRemaining,
       Long rateLimitTokensLimit,
-      Instant rateLimitTokensReset
+      Instant rateLimitTokensReset,
+      long claudeDurationMs
   ) {}
 
   public UsageStats getLastUsage() { return lastUsage; }
@@ -95,7 +96,9 @@ public class ClaudeService {
 
     // Use the typed create() — the response object carries the parsed
     // BriefingResponse via .content().stream() and also exposes .usage().
+    long startNanos = System.nanoTime();
     var response = client.messages().create(params);
+    long claudeDurationMs = (System.nanoTime() - startNanos) / 1_000_000L;
 
     BriefingResponse parsed = response.content().stream()
         .flatMap(cb -> cb.text().stream())
@@ -122,12 +125,14 @@ public class ClaudeService {
     this.lastUsage = new UsageStats(
         inputTokens, outputTokens, callCost,
         cumIn, cumOut, cumCost,
-        limitRemaining, limitTotal, limitReset);
+        limitRemaining, limitTotal, limitReset,
+        claudeDurationMs);
 
-    log.info("Claude usage: this call in={} out={} cost=${} · cumulative in={} out={} cost=${} · limit remaining={}/{}",
+    log.info("Claude usage: this call in={} out={} cost=${} · cumulative in={} out={} cost=${} · limit remaining={}/{} · {}ms",
         inputTokens, outputTokens, String.format("%.5f", callCost),
         cumIn, cumOut, String.format("%.5f", cumCost),
-        limitRemaining, limitTotal);
+        limitRemaining, limitTotal,
+        claudeDurationMs);
 
     return parsed;
   }

@@ -266,6 +266,31 @@
     white-space: nowrap;
   }
 
+  /* Build timing — feed fetch + Claude API call elapsed. */
+  .timing-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    padding: 10px 14px;
+    margin: 0 0 16px;
+    background: var(--paper-warm);
+    border-left: 3px solid var(--ink-faint);
+    font-family: 'DM Mono', monospace;
+    font-size: 10.5px;
+  }
+  .timing-item { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .timing-label {
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .timing-value {
+    color: var(--ink);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
   /* Age-filter slider — client-side, hides articles older than N hours. */
   .filter-bar {
     display: flex;
@@ -700,6 +725,7 @@ ${articleText}`;
     messages: [{ role: 'user', content: prompt }]
   };
 
+  const start = performance.now();
   const res = await fetch(CLAUDE_API_URL, {
     method: 'POST',
     headers: {
@@ -717,6 +743,7 @@ ${articleText}`;
   }
 
   const data = await res.json();
+  const claudeDurationMs = Math.round(performance.now() - start);
   const textBlock = (data.content || []).find(b => b.type === 'text');
   if (!textBlock) throw new Error('No text block in Claude response');
 
@@ -728,6 +755,7 @@ ${articleText}`;
     rateLimitTokensRemaining: parseInt(res.headers.get('anthropic-ratelimit-tokens-remaining'), 10) || null,
     rateLimitTokensLimit: parseInt(res.headers.get('anthropic-ratelimit-tokens-limit'), 10) || null,
     rateLimitTokensReset: res.headers.get('anthropic-ratelimit-tokens-reset') || null,
+    claudeDurationMs,
   };
 
   return { briefing: JSON.parse(textBlock.text), usage };
@@ -784,6 +812,22 @@ function renderUsageBar(usage, cumulative) {
     </div>`;
 }
 
+function fmtDuration(ms) {
+  if (ms < 1000) return ms + ' ms';
+  return (ms / 1000).toFixed(2) + ' s';
+}
+
+function renderTimingBar(fetchDurationMs, succeeded, totalFeeds, claudeDurationMs) {
+  let cells = `
+    <div class="timing-item"><span class="timing-label">Feed fetch</span><span class="timing-value">${fmtDuration(fetchDurationMs)} · ${succeeded}/${totalFeeds} ok</span></div>`;
+  if (claudeDurationMs != null) {
+    cells += `
+    <div class="timing-item"><span class="timing-label">Claude analysis</span><span class="timing-value">${fmtDuration(claudeDurationMs)}</span></div>
+    <div class="timing-item"><span class="timing-label">Total build</span><span class="timing-value">${fmtDuration(fetchDurationMs + claudeDurationMs)}</span></div>`;
+  }
+  return `<div class="timing-bar">${cells}</div>`;
+}
+
 // ─── CORS proxy + multi-feed fetch ───────────────────────────────────────────
 // SMH's main feed.xml caps at ~20 top stories. To get real depth we pull
 // every non-sport section feed in parallel and dedupe by article URL.
@@ -829,6 +873,7 @@ async function fetchWithProxy(url) {
 // Dedupes by article slug (SMH URLs end in -p<digits><alpha>.html — that's
 // a unique article ID that survives tracking params and feed-specific URLs).
 async function fetchAllFeeds() {
+  const start = performance.now();
   const results = await Promise.allSettled(
     RSS_FEEDS.map(url => fetchWithProxy(url).then(({ text }) => parseRSS(text)))
   );
@@ -853,7 +898,8 @@ async function fetchAllFeeds() {
   }
 
   unique.sort((a, b) => b.pubDateObj - a.pubDateObj);
-  return { articles: unique, succeeded, failed, totalBeforeDedupe: total };
+  const fetchDurationMs = Math.round(performance.now() - start);
+  return { articles: unique, succeeded, failed, totalBeforeDedupe: total, fetchDurationMs };
 }
 
 // Stable per-article key for dedup across feeds.
@@ -1071,7 +1117,7 @@ async function loadFeed() {
   statusEl.innerHTML = `<div class="spinner"></div><h2>Fetching feeds…</h2><p>Pulling ${RSS_FEEDS.length} SMH section feeds in parallel via CORS proxy</p>`;
 
   try {
-    const { articles, succeeded, failed, totalBeforeDedupe } = await fetchAllFeeds();
+    const { articles, succeeded, failed, totalBeforeDedupe, fetchDurationMs } = await fetchAllFeeds();
     if (articles.length === 0) {
       throw new Error(`All ${RSS_FEEDS.length} feeds failed to load`);
     }
@@ -1114,6 +1160,7 @@ async function loadFeed() {
     // On any failure, fall back silently to the keyword classifier.
     let claudeThemes = null;
     let usageBarHtml = '';
+    let claudeDurationMs = null;
     const apiKey = keyInput.value.trim();
     if (apiKey && kept.length > 0) {
       statusEl.innerHTML = `<div class="spinner"></div><h2>Claude is summarising…</h2><p>Reading ${kept.length} articles with ${CLAUDE_MODEL}</p>`;
@@ -1139,6 +1186,7 @@ async function loadFeed() {
         }));
         const cumulative = bumpCumulative(usage);
         usageBarHtml = renderUsageBar(usage, cumulative);
+        claudeDurationMs = usage.claudeDurationMs;
         cutoffInfo.innerHTML += ` · AI-grouped`;
       } catch (e) {
         console.warn('Claude enrichment failed:', e);
@@ -1153,7 +1201,8 @@ async function loadFeed() {
     loadBtn.style.display = 'none';
     refreshBtn.style.display = 'inline-block';
 
-    renderArticles(kept, claudeThemes, usageBarHtml);
+    const timingBarHtml = renderTimingBar(fetchDurationMs, succeeded, RSS_FEEDS.length, claudeDurationMs);
+    renderArticles(kept, claudeThemes, usageBarHtml + timingBarHtml);
 
     // Successful render — remember this moment so the next load shows
     // only articles published after it.

@@ -69,10 +69,12 @@ public class FeedService {
       int feedsFailed,
       int feedsTotal,
       int rawItems,
-      int sportFiltered
+      int sportFiltered,
+      long fetchDurationMs
   ) {}
 
   public FetchResult fetchAll() {
+    long startNanos = System.nanoTime();
     List<CompletableFuture<List<Article>>> futures = FEEDS.stream()
         .map(this::fetchOneAsync)
         .toList();
@@ -110,10 +112,11 @@ public class FeedService {
         .toList();
     int sportFiltered = beforeSport - kept.size();
 
-    log.info("Feeds: {}/{} ok · {} raw · {} unique · {} sport filtered · {} kept",
-        succeeded, FEEDS.size(), raw, beforeSport, sportFiltered, kept.size());
+    long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
+    log.info("Feeds: {}/{} ok · {} raw · {} unique · {} sport filtered · {} kept · {}ms",
+        succeeded, FEEDS.size(), raw, beforeSport, sportFiltered, kept.size(), durationMs);
 
-    return new FetchResult(kept, succeeded, failed, FEEDS.size(), raw, sportFiltered);
+    return new FetchResult(kept, succeeded, failed, FEEDS.size(), raw, sportFiltered, durationMs);
   }
 
   private CompletableFuture<List<Article>> fetchOneAsync(String url) {

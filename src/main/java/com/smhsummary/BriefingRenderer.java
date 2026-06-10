@@ -248,6 +248,20 @@ public class BriefingRenderer {
       sb.append("</div>\n");
     }
 
+    // Timing bar — how long the build took. Always shows feed fetch; Claude
+    // analysis only when Claude was actually called.
+    sb.append("<div class=\"timing-bar\">\n");
+    sb.append(timingCell("Feed fetch",
+        formatDuration(fetch.fetchDurationMs()) + " · " +
+        fetch.feedsSucceeded() + "/" + fetch.feedsTotal() + " ok"));
+    if (usage != null) {
+      sb.append(timingCell("Claude analysis",
+          formatDuration(usage.claudeDurationMs())));
+      long totalMs = fetch.fetchDurationMs() + usage.claudeDurationMs();
+      sb.append(timingCell("Total build", formatDuration(totalMs)));
+    }
+    sb.append("</div>\n");
+
     // Since-banner (server-rendered when ?since= was in the URL)
     if (since != null) {
       int hidden = Math.max(0, totalAvailable - articles.size());
@@ -537,6 +551,17 @@ public class BriefingRenderer {
   private static String usageCell(String label, String value) {
     return "  <div class=\"usage-item\"><span class=\"usage-label\">" + escape(label)
         + "</span><span class=\"usage-value\">" + escape(value) + "</span></div>\n";
+  }
+
+  private static String timingCell(String label, String value) {
+    return "  <div class=\"timing-item\"><span class=\"timing-label\">" + escape(label)
+        + "</span><span class=\"timing-value\">" + escape(value) + "</span></div>\n";
+  }
+
+  /** Sub-second values render in ms, longer values in seconds with two decimals. */
+  private static String formatDuration(long ms) {
+    if (ms < 1000) return ms + " ms";
+    return String.format(Locale.ENGLISH, "%.2f s", ms / 1000.0);
   }
 
   private static String formatTokens(long n) {
